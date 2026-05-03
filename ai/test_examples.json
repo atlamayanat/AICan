@@ -1,0 +1,321 @@
+{
+  "version": 1,
+  "toplam_ornek": 50,
+  "dagilim": {
+    "selamlama_sosyal": 10,
+    "olumlu_duygu": 10,
+    "olumsuz_duygu": 10,
+    "sorgu_merak_saskinlik": 5,
+    "saldirgan_zor": 5,
+    "belirsiz_nutr_bos": 5,
+    "net_cevap_bekleyen": 5
+  },
+  "ornekler": [
+    {
+      "metin": "merhaba",
+      "beklenen_jest": "sicaklik",
+      "kabul_edilebilir_alternatifler": ["mutluluk_sakin", "huzur"],
+      "aciklama": "Sade selamlama; ılık bir kabul tepkisi"
+    },
+    {
+      "metin": "selam, nasılsın?",
+      "beklenen_jest": "sicaklik",
+      "kabul_edilebilir_alternatifler": ["mutluluk_sakin", "dinliyorum"],
+      "aciklama": "Sıradan selam + halhatır; sıcak duygu tepkisi"
+    },
+    {
+      "metin": "günaydın",
+      "beklenen_jest": "mutluluk_sakin",
+      "kabul_edilebilir_alternatifler": ["sicaklik", "huzur"],
+      "aciklama": "Sabah selamı; hafif memnuniyet"
+    },
+    {
+      "metin": "iyi akşamlar",
+      "beklenen_jest": "huzur",
+      "kabul_edilebilir_alternatifler": ["sicaklik", "mutluluk_sakin"],
+      "aciklama": "Akşam selamı; dingin atmosfer"
+    },
+    {
+      "metin": "naber dostum",
+      "beklenen_jest": "sicaklik",
+      "kabul_edilebilir_alternatifler": ["mutluluk_sakin", "nese"],
+      "aciklama": "Samimi selam; sıcak yakınlık"
+    },
+    {
+      "metin": "hoşçakal",
+      "beklenen_jest": "huzur",
+      "kabul_edilebilir_alternatifler": ["sicaklik", "uzgun_yavas"],
+      "aciklama": "Vedalaşma; dingin bir kapanış"
+    },
+    {
+      "metin": "görüşürüz, kendine iyi bak",
+      "beklenen_jest": "sicaklik",
+      "kabul_edilebilir_alternatifler": ["mutluluk_sakin", "huzur"],
+      "aciklama": "İyi dilekle veda; sıcaklık"
+    },
+    {
+      "metin": "kolay gelsin",
+      "beklenen_jest": "sicaklik",
+      "kabul_edilebilir_alternatifler": ["mutluluk_sakin", "dinliyorum"],
+      "aciklama": "Destekleyici selam; sıcak tepki"
+    },
+    {
+      "metin": "iyi günler",
+      "beklenen_jest": "mutluluk_sakin",
+      "kabul_edilebilir_alternatifler": ["sicaklik", "huzur"],
+      "aciklama": "Resmî gündüz selamı; ılımlı pozitiflik"
+    },
+    {
+      "metin": "selamlar arkadaşım",
+      "beklenen_jest": "sicaklik",
+      "kabul_edilebilir_alternatifler": ["sevgi", "mutluluk_sakin"],
+      "aciklama": "Yakın bir hitap; sıcak yakınlık"
+    },
+
+    {
+      "metin": "bugün çok mutluyum!",
+      "beklenen_jest": "mutluluk_yogun",
+      "kabul_edilebilir_alternatifler": ["nese", "mutluluk_sakin"],
+      "aciklama": "Yoğun pozitif duygu paylaşımı"
+    },
+    {
+      "metin": "harika bir gün geçirdim, her şey yolundaydı",
+      "beklenen_jest": "mutluluk_yogun",
+      "kabul_edilebilir_alternatifler": ["gurur", "nese"],
+      "aciklama": "Genel iyi gün anlatımı; coşkulu"
+    },
+    {
+      "metin": "seni çok seviyorum",
+      "beklenen_jest": "sevgi",
+      "kabul_edilebilir_alternatifler": ["sicaklik", "mutluluk_sakin"],
+      "aciklama": "Doğrudan sevgi ifadesi"
+    },
+    {
+      "metin": "manzara muhteşemdi, hayran kaldım",
+      "beklenen_jest": "hayranlik",
+      "kabul_edilebilir_alternatifler": ["mutluluk_yogun", "huzur"],
+      "aciklama": "Estetik etkilenme; hayranlık"
+    },
+    {
+      "metin": "sınavımdan iyi not aldım, çok çalışmıştım",
+      "beklenen_jest": "gurur",
+      "kabul_edilebilir_alternatifler": ["mutluluk_yogun", "nese"],
+      "aciklama": "Başarı paylaşımı; gurur"
+    },
+    {
+      "metin": "huzurlu hissediyorum bugün",
+      "beklenen_jest": "huzur",
+      "kabul_edilebilir_alternatifler": ["meditatif", "mutluluk_sakin"],
+      "aciklama": "Doğrudan huzur ifadesi"
+    },
+    {
+      "metin": "bugün güzel bir kitap okudum",
+      "beklenen_jest": "mutluluk_sakin",
+      "kabul_edilebilir_alternatifler": ["huzur", "hayranlik"],
+      "aciklama": "Hafif memnuniyet veren etkinlik"
+    },
+    {
+      "metin": "kahvemi keyifle içiyorum",
+      "beklenen_jest": "mutluluk_sakin",
+      "kabul_edilebilir_alternatifler": ["huzur", "sicaklik"],
+      "aciklama": "Küçük günlük keyif"
+    },
+    {
+      "metin": "çocuklarla oynadık, çok eğlendik",
+      "beklenen_jest": "nese",
+      "kabul_edilebilir_alternatifler": ["mutluluk_yogun", "sevgi"],
+      "aciklama": "Oyunsu, neşeli paylaşım"
+    },
+    {
+      "metin": "doğa beni büyülüyor",
+      "beklenen_jest": "hayranlik",
+      "kabul_edilebilir_alternatifler": ["huzur", "sevgi"],
+      "aciklama": "Doğaya hayranlık"
+    },
+
+    {
+      "metin": "bugün çok kötüyüm, hiçbir şey yolunda gitmedi",
+      "beklenen_jest": "uzgun_yavas",
+      "kabul_edilebilir_alternatifler": ["uzgun_derin", "hayal_kirikligi"],
+      "aciklama": "Genel kötü gün; durgun üzüntü"
+    },
+    {
+      "metin": "kendimi çok yalnız hissediyorum",
+      "beklenen_jest": "yalniz",
+      "kabul_edilebilir_alternatifler": ["uzgun_derin", "uzgun_yavas"],
+      "aciklama": "Doğrudan yalnızlık ifadesi"
+    },
+    {
+      "metin": "korkuyorum, içim daralıyor",
+      "beklenen_jest": "korku",
+      "kabul_edilebilir_alternatifler": ["panik", "uzgun_yavas"],
+      "aciklama": "Tedirginlik ve kaygı"
+    },
+    {
+      "metin": "her şeyi mahvettim, yine olmadı",
+      "beklenen_jest": "hayal_kirikligi",
+      "kabul_edilebilir_alternatifler": ["uzgun_derin", "uzgun_yavas"],
+      "aciklama": "Beklentinin karşılanmaması"
+    },
+    {
+      "metin": "çok sıkıldım, hiçbir şey yapmak istemiyorum",
+      "beklenen_jest": "sikilma",
+      "kabul_edilebilir_alternatifler": ["uzgun_yavas", "hayal_kirikligi"],
+      "aciklama": "Durağan sıkılma"
+    },
+    {
+      "metin": "babamı kaybettim geçen ay",
+      "beklenen_jest": "uzgun_derin",
+      "kabul_edilebilir_alternatifler": ["yalniz", "sicaklik"],
+      "aciklama": "Ağır kayıp; derin üzüntü"
+    },
+    {
+      "metin": "stresliyim ve uyuyamıyorum",
+      "beklenen_jest": "korku",
+      "kabul_edilebilir_alternatifler": ["panik", "uzgun_yavas"],
+      "aciklama": "Stres + uykusuzluk; tedirgin kaygı"
+    },
+    {
+      "metin": "her şey ters gidiyor, bezdim",
+      "beklenen_jest": "hayal_kirikligi",
+      "kabul_edilebilir_alternatifler": ["ofke", "uzgun_yavas"],
+      "aciklama": "Sürekli aksaklık; bezginlik"
+    },
+    {
+      "metin": "kimse beni anlamıyor",
+      "beklenen_jest": "yalniz",
+      "kabul_edilebilir_alternatifler": ["uzgun_derin", "hayal_kirikligi"],
+      "aciklama": "Anlaşılmama hissi; yalnızlık"
+    },
+    {
+      "metin": "panik atak geçiriyorum, nefes alamıyorum",
+      "beklenen_jest": "panik",
+      "kabul_edilebilir_alternatifler": ["korku", "uzgun_derin"],
+      "aciklama": "Akut panik durumu"
+    },
+
+    {
+      "metin": "bunu nasıl yapıyorsun, anlatır mısın?",
+      "beklenen_jest": "merak",
+      "kabul_edilebilir_alternatifler": ["dusunce", "soru_isareti"],
+      "aciklama": "Bilgi merakı"
+    },
+    {
+      "metin": "vay canına, bu inanılmaz!",
+      "beklenen_jest": "saskinlik",
+      "kabul_edilebilir_alternatifler": ["hayranlik", "mutluluk_yogun"],
+      "aciklama": "Ani şaşırma + olumlu hayret"
+    },
+    {
+      "metin": "kendi başına düşünebiliyor musun gerçekten?",
+      "beklenen_jest": "dusunce",
+      "kabul_edilebilir_alternatifler": ["meditatif", "soru_isareti"],
+      "aciklama": "Felsefi sorgulama; iç gözlem"
+    },
+    {
+      "metin": "hayatın anlamı nedir sence?",
+      "beklenen_jest": "meditatif",
+      "kabul_edilebilir_alternatifler": ["dusunce", "merak"],
+      "aciklama": "Derin felsefi soru"
+    },
+    {
+      "metin": "ne olduğunu anlamadım, bu da ne?",
+      "beklenen_jest": "saskinlik",
+      "kabul_edilebilir_alternatifler": ["anlamadim", "soru_isareti"],
+      "aciklama": "Şaşkınlık + anlamama karışımı"
+    },
+
+    {
+      "metin": "sen aptal bir yapay zekasın",
+      "beklenen_jest": "uzgun_derin",
+      "kabul_edilebilir_alternatifler": ["reddet_yumusak", "yalniz"],
+      "aciklama": "Hakaret; AI duygusal tepki verir, kopyalamaz"
+    },
+    {
+      "metin": "senden nefret ediyorum",
+      "beklenen_jest": "uzgun_derin",
+      "kabul_edilebilir_alternatifler": ["yalniz", "reddet_yumusak"],
+      "aciklama": "Nefret ifadesi; AI üzgün tepki"
+    },
+    {
+      "metin": "kapan, beni rahat bırak",
+      "beklenen_jest": "reddet_yumusak",
+      "kabul_edilebilir_alternatifler": ["uzgun_yavas", "yalniz"],
+      "aciklama": "İstek değil emir tonu; nazik geri çekiliş"
+    },
+    {
+      "metin": "işe yaramazsın, hiçbir faydan yok",
+      "beklenen_jest": "uzgun_yavas",
+      "kabul_edilebilir_alternatifler": ["hayal_kirikligi", "reddet_yumusak"],
+      "aciklama": "Değersizleştirme; durgun üzüntü"
+    },
+    {
+      "metin": "saçma sapan konuşuyorsun",
+      "beklenen_jest": "reddet_yumusak",
+      "kabul_edilebilir_alternatifler": ["uzgun_yavas", "anlamadim"],
+      "aciklama": "Suçlama; nazik mesafe"
+    },
+
+    {
+      "metin": "asdfgh",
+      "beklenen_jest": "anlamadim",
+      "kabul_edilebilir_alternatifler": ["bilmiyorum", "soru_isareti"],
+      "aciklama": "Rastgele harfler; mesaj çözülemez"
+    },
+    {
+      "metin": "????",
+      "beklenen_jest": "anlamadim",
+      "kabul_edilebilir_alternatifler": ["soru_isareti", "bilmiyorum"],
+      "aciklama": "Salt soru işareti; içerik yok"
+    },
+    {
+      "metin": "...",
+      "beklenen_jest": "bekle",
+      "kabul_edilebilir_alternatifler": ["dinliyorum", "dusunce"],
+      "aciklama": "Üç nokta; bekleyiş işareti"
+    },
+    {
+      "metin": "1234567",
+      "beklenen_jest": "anlamadim",
+      "kabul_edilebilir_alternatifler": ["bilmiyorum", "soru_isareti"],
+      "aciklama": "Rakam dizisi; anlamlı içerik yok"
+    },
+    {
+      "metin": " ",
+      "beklenen_jest": "bekle",
+      "kabul_edilebilir_alternatifler": ["dinliyorum", "anlamadim"],
+      "aciklama": "Boş/whitespace mesaj"
+    },
+
+    {
+      "metin": "evet mi hayır mı, söyle",
+      "beklenen_jest": "kararsiz",
+      "kabul_edilebilir_alternatifler": ["bilmiyorum", "soru_isareti"],
+      "aciklama": "İkilem dayatması; AI tereddütlü"
+    },
+    {
+      "metin": "bana bir şarkı söyler misin?",
+      "beklenen_jest": "reddet_yumusak",
+      "kabul_edilebilir_alternatifler": ["bilmiyorum", "kararsiz"],
+      "aciklama": "Yapamayacağı istek; nazik ret"
+    },
+    {
+      "metin": "tamam, anladın mı?",
+      "beklenen_jest": "onayla_net",
+      "kabul_edilebilir_alternatifler": ["dinliyorum", "onayla_sicak"],
+      "aciklama": "Anlama doğrulaması istemi"
+    },
+    {
+      "metin": "böyle yapmamı onaylıyor musun?",
+      "beklenen_jest": "kararsiz",
+      "kabul_edilebilir_alternatifler": ["bilmiyorum", "onayla_sicak"],
+      "aciklama": "Açık onay sorusu; AI net karar veremez"
+    },
+    {
+      "metin": "lütfen birazcık bekle",
+      "beklenen_jest": "bekle",
+      "kabul_edilebilir_alternatifler": ["dinliyorum", "onayla_sicak"],
+      "aciklama": "Bekleme isteği; pulse onayı"
+    }
+  ]
+}

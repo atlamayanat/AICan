@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+.python-version
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+
+# PlatformIO (regenerate edebilir)
+.pio/
+src/
+lib/
+include/
+test/
+platformio.ini
+
+# Auto-generated artifacts
+ai/Modelfile
+
+# Local logs (kisisel konusma verisi icerebilir — paylasma)
+logs/*.log
+
+# Backup / temp
+sistempromptyedek.txt
+*.bak
+*~
+
+# OS
+.DS_Store
+Thumbs.db

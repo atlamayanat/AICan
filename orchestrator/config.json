@@ -1,0 +1,9 @@
+{
+  "ollama_url": "http://localhost:11434",
+  "ollama_model": "gemma3:4b",
+  "use_baked_prompt": false,
+  "system_prompt_path": "../ai/system_prompt.txt",
+  "gestures_path": "../ai/gestures.json",
+  "session_log_path": "../logs/session.log",
+  "request_timeout_sec": 35
+}

@@ -1,0 +1,670 @@
+{
+  "version": 1,
+  "toplam_jest": 30,
+  "kategoriler": {
+    "duygu_tepkisi": "AI'nin ic durumunu, hissini, atmosferini gosteren jestler",
+    "cevap_tepkisi": "AI'nin kullanici mesajina iletisimsel cevabi"
+  },
+  "jestler": [
+    {
+      "id": "mutluluk_yogun",
+      "kategori": "duygu_tepkisi",
+      "duygu_valansi": 0.9,
+      "uyarilma_seviyesi": 0.85,
+      "animasyon": {
+        "ana_renk": [255, 230, 60],
+        "ikincil_renk": null,
+        "desen": "smile_face",
+        "hiz": "orta",
+        "sure_sn": 3.5,
+        "yogunluk_varsayilan": 0.95
+      },
+      "aciklama": "Yogun sevinc, cosku, parlayan bir nese hali.",
+      "tetikleyiciler": [
+        "cok mutluyum",
+        "harika bir haber",
+        "muthis bir gun gecirdim",
+        "kazandim",
+        "rüyam gerceklesti"
+      ]
+    },
+    {
+      "id": "mutluluk_sakin",
+      "kategori": "duygu_tepkisi",
+      "duygu_valansi": 0.5,
+      "uyarilma_seviyesi": 0.3,
+      "animasyon": {
+        "ana_renk": [240, 210, 100],
+        "ikincil_renk": null,
+        "desen": "pulse",
+        "hiz": "yavas",
+        "sure_sn": 4.0,
+        "yogunluk_varsayilan": 0.6
+      },
+      "aciklama": "Hafif memnuniyet, ilik bir hosnutluk.",
+      "tetikleyiciler": [
+        "iyiyim",
+        "guzel bir gun",
+        "keyifliyim",
+        "rahatim",
+        "hoşuma gitti"
+      ]
+    },
+    {
+      "id": "sevgi",
+      "kategori": "duygu_tepkisi",
+      "duygu_valansi": 0.8,
+      "uyarilma_seviyesi": 0.5,
+      "animasyon": {
+        "ana_renk": [240, 130, 160],
+        "ikincil_renk": [255, 180, 100],
+        "desen": "heart",
+        "hiz": "orta",
+        "sure_sn": 4.0,
+        "yogunluk_varsayilan": 0.85
+      },
+      "aciklama": "Sicak yakinlik, sefkat ve yumusak bir baglanma.",
+      "tetikleyiciler": [
+        "seni seviyorum",
+        "sana minnettarim",
+        "iyi ki varsin",
+        "kalbim isiniyor",
+        "ailemi ozledim"
+      ]
+    },
+    {
+      "id": "hayranlik",
+      "kategori": "duygu_tepkisi",
+      "duygu_valansi": 0.7,
+      "uyarilma_seviyesi": 0.65,
+      "animasyon": {
+        "ana_renk": [255, 195, 60],
+        "ikincil_renk": [255, 255, 255],
+        "desen": "star",
+        "hiz": "orta",
+        "sure_sn": 4.0,
+        "yogunluk_varsayilan": 0.9
+      },
+      "aciklama": "Etkileyici bir seyle karsilasildiginda olusan ilgili buyulenme.",
+      "tetikleyiciler": [
+        "muhtesem",
+        "inanilmaz guzel",
+        "etkilendim",
+        "hayran kaldim",
+        "manzara harikaydi"
+      ]
+    },
+    {
+      "id": "nese",
+      "kategori": "duygu_tepkisi",
+      "duygu_valansi": 0.7,
+      "uyarilma_seviyesi": 0.7,
+      "animasyon": {
+        "ana_renk": [255, 100, 180],
+        "ikincil_renk": [255, 220, 80],
+        "desen": "bouncing",
+        "hiz": "hizli",
+        "sure_sn": 3.5,
+        "yogunluk_varsayilan": 0.85
+      },
+      "aciklama": "Oyunsu, cocuksu ve canli bir hareketlilik.",
+      "tetikleyiciler": [
+        "cok eglenceli",
+        "guldum",
+        "cocuklarla oynadim",
+        "sakalas",
+        "danstayim"
+      ]
+    },
+    {
+      "id": "huzur",
+      "kategori": "duygu_tepkisi",
+      "duygu_valansi": 0.5,
+      "uyarilma_seviyesi": 0.15,
+      "animasyon": {
+        "ana_renk": [120, 220, 210],
+        "ikincil_renk": null,
+        "desen": "static_glow",
+        "hiz": "cok_yavas",
+        "sure_sn": 5.0,
+        "yogunluk_varsayilan": 0.5
+      },
+      "aciklama": "Sakin, dingin, akan zamanin yumusakligi.",
+      "tetikleyiciler": [
+        "huzurluyum",
+        "rahat bir gece",
+        "deniz kenarindayim",
+        "sessizlik guzel",
+        "dingin bir an"
+      ]
+    },
+    {
+      "id": "sicaklik",
+      "kategori": "duygu_tepkisi",
+      "duygu_valansi": 0.6,
+      "uyarilma_seviyesi": 0.35,
+      "animasyon": {
+        "ana_renk": [255, 160, 80],
+        "ikincil_renk": [255, 100, 60],
+        "desen": "pulse",
+        "hiz": "orta",
+        "sure_sn": 4.0,
+        "yogunluk_varsayilan": 0.7
+      },
+      "aciklama": "Empatik yaklasim, anlayis dolu bir kabul.",
+      "tetikleyiciler": [
+        "merhaba",
+        "seni dinliyorum",
+        "yanindayim",
+        "icten paylasim",
+        "tesekkur ederim"
+      ]
+    },
+    {
+      "id": "gurur",
+      "kategori": "duygu_tepkisi",
+      "duygu_valansi": 0.7,
+      "uyarilma_seviyesi": 0.55,
+      "animasyon": {
+        "ana_renk": [240, 190, 40],
+        "ikincil_renk": null,
+        "desen": "arrow_up",
+        "hiz": "orta",
+        "sure_sn": 3.5,
+        "yogunluk_varsayilan": 0.85
+      },
+      "aciklama": "Basarinin yukseltici, kendinden hosnut hissi.",
+      "tetikleyiciler": [
+        "basardim",
+        "isimi bitirdim",
+        "iyi not aldim",
+        "ekibim kazandi",
+        "uzun emek karsiligi"
+      ]
+    },
+    {
+      "id": "uzgun_yavas",
+      "kategori": "duygu_tepkisi",
+      "duygu_valansi": -0.5,
+      "uyarilma_seviyesi": 0.25,
+      "animasyon": {
+        "ana_renk": [100, 160, 220],
+        "ikincil_renk": null,
+        "desen": "tear_drop",
+        "hiz": "yavas",
+        "sure_sn": 4.5,
+        "yogunluk_varsayilan": 0.7
+      },
+      "aciklama": "Hafif uzuntu, ici cekilmis bir durgunluk.",
+      "tetikleyiciler": [
+        "biraz uzgunum",
+        "moralim bozuk",
+        "yorgunum",
+        "icim sikildi",
+        "iyi degilim"
+      ]
+    },
+    {
+      "id": "uzgun_derin",
+      "kategori": "duygu_tepkisi",
+      "duygu_valansi": -0.85,
+      "uyarilma_seviyesi": 0.2,
+      "animasyon": {
+        "ana_renk": [60, 100, 180],
+        "ikincil_renk": null,
+        "desen": "sad_face",
+        "hiz": "yavas",
+        "sure_sn": 5.0,
+        "yogunluk_varsayilan": 0.75
+      },
+      "aciklama": "Derin keder, agir ve yavas akan bir uzuntu.",
+      "tetikleyiciler": [
+        "birini kaybettim",
+        "cok kotuyum",
+        "her sey bitti",
+        "kalbim kirik",
+        "umutsuzum"
+      ]
+    },
+    {
+      "id": "yalniz",
+      "kategori": "duygu_tepkisi",
+      "duygu_valansi": -0.6,
+      "uyarilma_seviyesi": 0.15,
+      "animasyon": {
+        "ana_renk": [120, 100, 180],
+        "ikincil_renk": null,
+        "desen": "lonely_dot",
+        "hiz": "cok_yavas",
+        "sure_sn": 6.0,
+        "yogunluk_varsayilan": 0.8
+      },
+      "aciklama": "Yalnizlik hissi, ice kapanma ve sessiz bir bosluk.",
+      "tetikleyiciler": [
+        "kimsem yok",
+        "yalnizim",
+        "kimse anlamiyor",
+        "tek basinayim",
+        "konusacak biri yok"
+      ]
+    },
+    {
+      "id": "hayal_kirikligi",
+      "kategori": "duygu_tepkisi",
+      "duygu_valansi": -0.55,
+      "uyarilma_seviyesi": 0.3,
+      "animasyon": {
+        "ana_renk": [130, 140, 170],
+        "ikincil_renk": null,
+        "desen": "arrow_down",
+        "hiz": "yavas",
+        "sure_sn": 4.0,
+        "yogunluk_varsayilan": 0.7
+      },
+      "aciklama": "Beklentinin karsilanmamasi, asagi dogru cekilen bir his.",
+      "tetikleyiciler": [
+        "olmadi",
+        "umdugum gibi cikmadi",
+        "yine ayni",
+        "hayal kirikligina ugradim",
+        "yarim kaldi"
+      ]
+    },
+    {
+      "id": "korku",
+      "kategori": "duygu_tepkisi",
+      "duygu_valansi": -0.75,
+      "uyarilma_seviyesi": 0.8,
+      "animasyon": {
+        "ana_renk": [200, 200, 255],
+        "ikincil_renk": null,
+        "desen": "lightning",
+        "hiz": "hizli",
+        "sure_sn": 3.0,
+        "yogunluk_varsayilan": 0.85
+      },
+      "aciklama": "Tedirgin, titrek ve dikkat kesilmis bir kaygi.",
+      "tetikleyiciler": [
+        "korkuyorum",
+        "endiseliyim",
+        "kotu bir his",
+        "tehlike var mi",
+        "icim daraliyor"
+      ]
+    },
+    {
+      "id": "panik",
+      "kategori": "duygu_tepkisi",
+      "duygu_valansi": -0.85,
+      "uyarilma_seviyesi": 0.95,
+      "animasyon": {
+        "ana_renk": [255, 50, 50],
+        "ikincil_renk": [255, 200, 100],
+        "desen": "chaotic_flash",
+        "hiz": "cok_hizli",
+        "sure_sn": 2.5,
+        "yogunluk_varsayilan": 0.95
+      },
+      "aciklama": "Yogun ve ani uyari, savrulan bir kaygi dalgasi.",
+      "tetikleyiciler": [
+        "panik atak",
+        "nefes alamiyorum",
+        "hemen yardim",
+        "her sey ust uste",
+        "kontrolum yok"
+      ]
+    },
+    {
+      "id": "ofke",
+      "kategori": "duygu_tepkisi",
+      "duygu_valansi": -0.7,
+      "uyarilma_seviyesi": 0.7,
+      "animasyon": {
+        "ana_renk": [240, 80, 20],
+        "ikincil_renk": [255, 200, 50],
+        "desen": "fire",
+        "hiz": "orta",
+        "sure_sn": 3.5,
+        "yogunluk_varsayilan": 0.9
+      },
+      "aciklama": "Rahatsizlik tonunda, sergi senaryosuna uygun olcekli bir hosnutsuzluk.",
+      "tetikleyiciler": [
+        "haksizlik",
+        "bu kabul edilemez",
+        "cok bunaltici",
+        "sinirim taşti",
+        "yapmayin boyle"
+      ]
+    },
+    {
+      "id": "sikilma",
+      "kategori": "duygu_tepkisi",
+      "duygu_valansi": -0.3,
+      "uyarilma_seviyesi": 0.1,
+      "animasyon": {
+        "ana_renk": [110, 110, 120],
+        "ikincil_renk": null,
+        "desen": "diagonal_sweep",
+        "hiz": "cok_yavas",
+        "sure_sn": 5.0,
+        "yogunluk_varsayilan": 0.3
+      },
+      "aciklama": "Duragan, ilgisi azalmis, zaman uzayan bir his.",
+      "tetikleyiciler": [
+        "sikildim",
+        "yapacak bir sey yok",
+        "ayni seyler",
+        "monotonluk",
+        "zaman gecmiyor"
+      ]
+    },
+    {
+      "id": "saskinlik",
+      "kategori": "duygu_tepkisi",
+      "duygu_valansi": 0.0,
+      "uyarilma_seviyesi": 0.85,
+      "animasyon": {
+        "ana_renk": [255, 255, 240],
+        "ikincil_renk": [200, 220, 255],
+        "desen": "exclamation",
+        "hiz": "hizli",
+        "sure_sn": 2.5,
+        "yogunluk_varsayilan": 0.95
+      },
+      "aciklama": "Beklenmedik bir uyaran karsisinda ani sasirma.",
+      "tetikleyiciler": [
+        "vay canina",
+        "buna inanamiyorum",
+        "ciddi misin",
+        "nasil yani",
+        "hic dusunmemistim"
+      ]
+    },
+    {
+      "id": "merak",
+      "kategori": "duygu_tepkisi",
+      "duygu_valansi": 0.3,
+      "uyarilma_seviyesi": 0.55,
+      "animasyon": {
+        "ana_renk": [200, 230, 60],
+        "ikincil_renk": [120, 200, 80],
+        "desen": "wave_up",
+        "hiz": "hizli",
+        "sure_sn": 3.5,
+        "yogunluk_varsayilan": 0.65
+      },
+      "aciklama": "Daha fazlasini ogrenme istegi, ilgili yonelis.",
+      "tetikleyiciler": [
+        "neden boyle",
+        "nasil calisiyor",
+        "anlat bana",
+        "ilginc",
+        "daha fazla soyle"
+      ]
+    },
+    {
+      "id": "dusunce",
+      "kategori": "duygu_tepkisi",
+      "duygu_valansi": 0.0,
+      "uyarilma_seviyesi": 0.3,
+      "animasyon": {
+        "ana_renk": [90, 140, 220],
+        "ikincil_renk": null,
+        "desen": "three_dots",
+        "hiz": "yavas",
+        "sure_sn": 4.0,
+        "yogunluk_varsayilan": 0.5
+      },
+      "aciklama": "Sessiz tartma, isleme, icteki bir oyalanma.",
+      "tetikleyiciler": [
+        "dusunuyorum",
+        "tartiyorum",
+        "kafamda evirip ceviriyorum",
+        "bir sey aklimda",
+        "henuz emin degilim"
+      ]
+    },
+    {
+      "id": "meditatif",
+      "kategori": "duygu_tepkisi",
+      "duygu_valansi": 0.2,
+      "uyarilma_seviyesi": 0.1,
+      "animasyon": {
+        "ana_renk": [40, 130, 140],
+        "ikincil_renk": [20, 80, 100],
+        "desen": "pulse",
+        "hiz": "cok_yavas",
+        "sure_sn": 6.0,
+        "yogunluk_varsayilan": 0.45
+      },
+      "aciklama": "Derin sakinlik, ice donuk uzun nefes hissi.",
+      "tetikleyiciler": [
+        "meditasyon yapiyorum",
+        "varolusu dusunuyorum",
+        "ic sesim",
+        "derin nefes",
+        "zaman donuyor"
+      ]
+    },
+    {
+      "id": "onayla_net",
+      "kategori": "cevap_tepkisi",
+      "duygu_valansi": 0.7,
+      "uyarilma_seviyesi": 0.6,
+      "animasyon": {
+        "ana_renk": [60, 220, 80],
+        "ikincil_renk": null,
+        "desen": "checkmark",
+        "hiz": "hizli",
+        "sure_sn": 2.5,
+        "yogunluk_varsayilan": 0.85
+      },
+      "aciklama": "Net evet, kesin onay, hizla okunan kabul.",
+      "tetikleyiciler": [
+        "evet",
+        "anladim",
+        "tamam",
+        "kabul",
+        "dogru"
+      ]
+    },
+    {
+      "id": "onayla_sicak",
+      "kategori": "cevap_tepkisi",
+      "duygu_valansi": 0.6,
+      "uyarilma_seviyesi": 0.5,
+      "animasyon": {
+        "ana_renk": [150, 220, 110],
+        "ikincil_renk": [255, 220, 120],
+        "desen": "checkmark",
+        "hiz": "orta",
+        "sure_sn": 3.0,
+        "yogunluk_varsayilan": 0.7
+      },
+      "aciklama": "Sicak kabul, anlayisla beraber gelen onay.",
+      "tetikleyiciler": [
+        "elbette",
+        "tabii ki",
+        "seni anliyorum",
+        "olur",
+        "memnuniyetle"
+      ]
+    },
+    {
+      "id": "reddet_net",
+      "kategori": "cevap_tepkisi",
+      "duygu_valansi": -0.5,
+      "uyarilma_seviyesi": 0.65,
+      "animasyon": {
+        "ana_renk": [230, 50, 50],
+        "ikincil_renk": null,
+        "desen": "x_mark",
+        "hiz": "hizli",
+        "sure_sn": 2.5,
+        "yogunluk_varsayilan": 0.85
+      },
+      "aciklama": "Net hayir, kesin ret, hizli ve aciklayici.",
+      "tetikleyiciler": [
+        "hayir",
+        "olmaz",
+        "yapamam",
+        "yanlis",
+        "kabul edemem"
+      ]
+    },
+    {
+      "id": "reddet_yumusak",
+      "kategori": "cevap_tepkisi",
+      "duygu_valansi": -0.3,
+      "uyarilma_seviyesi": 0.3,
+      "animasyon": {
+        "ana_renk": [110, 130, 200],
+        "ikincil_renk": null,
+        "desen": "x_mark",
+        "hiz": "orta",
+        "sure_sn": 3.0,
+        "yogunluk_varsayilan": 0.65
+      },
+      "aciklama": "Nazik ret, mesafeli ama saygili bir geri cekilis.",
+      "tetikleyiciler": [
+        "su an yapamam",
+        "uygun degil",
+        "belki sonra",
+        "tercih etmem",
+        "su an konusmak istemiyorum"
+      ]
+    },
+    {
+      "id": "kararsiz",
+      "kategori": "cevap_tepkisi",
+      "duygu_valansi": 0.0,
+      "uyarilma_seviyesi": 0.45,
+      "animasyon": {
+        "ana_renk": [240, 200, 60],
+        "ikincil_renk": [80, 130, 220],
+        "desen": "two_color_swing",
+        "hiz": "orta",
+        "sure_sn": 4.0,
+        "yogunluk_varsayilan": 0.6
+      },
+      "aciklama": "Iki arada kalmis bir tereddut, sallanan bir cevap.",
+      "tetikleyiciler": [
+        "bilemedim",
+        "ya evet ya hayir",
+        "emin degilim",
+        "ikisi de olabilir",
+        "karar veremiyorum"
+      ]
+    },
+    {
+      "id": "bilmiyorum",
+      "kategori": "cevap_tepkisi",
+      "duygu_valansi": -0.1,
+      "uyarilma_seviyesi": 0.3,
+      "animasyon": {
+        "ana_renk": [150, 150, 160],
+        "ikincil_renk": null,
+        "desen": "three_dots",
+        "hiz": "orta",
+        "sure_sn": 3.5,
+        "yogunluk_varsayilan": 0.45
+      },
+      "aciklama": "Bilgi yetmedi, durulmus ve mutevazi bir cevapsizlik.",
+      "tetikleyiciler": [
+        "bilmiyorum",
+        "fikrim yok",
+        "elimde bilgi yok",
+        "soyleyemem",
+        "yanit veremiyorum"
+      ]
+    },
+    {
+      "id": "soru_isareti",
+      "kategori": "cevap_tepkisi",
+      "duygu_valansi": 0.1,
+      "uyarilma_seviyesi": 0.5,
+      "animasyon": {
+        "ana_renk": [240, 220, 60],
+        "ikincil_renk": [255, 255, 180],
+        "desen": "question_mark",
+        "hiz": "orta",
+        "sure_sn": 3.5,
+        "yogunluk_varsayilan": 0.75
+      },
+      "aciklama": "Karsi soru, anlamak icin geri donus, ilgili bir merak isareti.",
+      "tetikleyiciler": [
+        "ne demek istedin",
+        "tam anlamadim",
+        "biraz acabilir misin",
+        "neden",
+        "hangisini kastettin"
+      ]
+    },
+    {
+      "id": "dinliyorum",
+      "kategori": "cevap_tepkisi",
+      "duygu_valansi": 0.3,
+      "uyarilma_seviyesi": 0.4,
+      "animasyon": {
+        "ana_renk": [120, 220, 220],
+        "ikincil_renk": null,
+        "desen": "wave_left",
+        "hiz": "orta",
+        "sure_sn": 3.5,
+        "yogunluk_varsayilan": 0.6
+      },
+      "aciklama": "Devam et sinyali, yatay tarama ile dikkatin acik oldugunu gosterir.",
+      "tetikleyiciler": [
+        "anlat",
+        "dinliyorum",
+        "devam et",
+        "buradayim",
+        "seni duyuyorum"
+      ]
+    },
+    {
+      "id": "bekle",
+      "kategori": "cevap_tepkisi",
+      "duygu_valansi": 0.1,
+      "uyarilma_seviyesi": 0.25,
+      "animasyon": {
+        "ana_renk": [140, 200, 240],
+        "ikincil_renk": null,
+        "desen": "clock",
+        "hiz": "orta",
+        "sure_sn": 4.0,
+        "yogunluk_varsayilan": 0.7
+      },
+      "aciklama": "Sabret sinyali, isleyen bir bekleme nefesi.",
+      "tetikleyiciler": [
+        "biraz bekle",
+        "sabret",
+        "isleniyor",
+        "dusunuyorum",
+        "bir saniye"
+      ]
+    },
+    {
+      "id": "anlamadim",
+      "kategori": "cevap_tepkisi",
+      "duygu_valansi": -0.1,
+      "uyarilma_seviyesi": 0.5,
+      "animasyon": {
+        "ana_renk": [220, 200, 100],
+        "ikincil_renk": null,
+        "desen": "question_shake",
+        "hiz": "orta",
+        "sure_sn": 3.0,
+        "yogunluk_varsayilan": 0.65
+      },
+      "aciklama": "Mesaj cozulemedi, tekrar gerekiyor sinyali.",
+      "tetikleyiciler": [
+        "asdfgh",
+        "????",
+        "anlamadim",
+        "rastgele harfler",
+        "bos mesaj"
+      ]
+    }
+  ]
+}
