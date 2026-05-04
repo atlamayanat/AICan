@@ -1,9 +1,10 @@
 {
   "ollama_url": "http://localhost:11434",
-  "ollama_model": "gemma3:4b",
+  "ollama_model": "qwen2.5:7b-instruct",
   "use_baked_prompt": false,
   "system_prompt_path": "../ai/system_prompt.txt",
   "gestures_path": "../ai/gestures.json",
   "session_log_path": "../logs/session.log",
-  "request_timeout_sec": 35
+  "request_timeout_sec": 35,
+  "history_max_turns": 6
 }

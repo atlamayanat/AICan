@@ -72,73 +72,108 @@ class App:
     # ---------- UI ----------
     def _build_ui(self) -> None:
         self.root.title("AI Body — Sergi Prototipi")
-        self.root.geometry("1500x950")
-        self.root.minsize(1280, 820)
-        self.root.configure(bg="#1a1a22")
+        self.root.geometry("1600x940")
+        self.root.minsize(1320, 860)
 
-        # Yeniden kullanilan stiller
-        self.FONT_HEADER = ("Segoe UI", 22, "bold")
-        self.FONT_PANEL_TITLE = ("Segoe UI", 12, "bold")
-        self.FONT_LABEL = ("Segoe UI", 13)
-        self.FONT_LABEL_BOLD = ("Segoe UI", 13, "bold")
-        self.FONT_YANIT = ("Segoe UI", 14, "italic")
-        self.FONT_MONO = ("Consolas", 12)
+        # Renk paleti — neon cyberpunk: koyu zemin + cyan/magenta/green vurgu
+        self.COLOR_BG = "#08080f"            # cok koyu mavi-siyah
+        self.COLOR_PANEL = "#11111e"         # panel zemini
+        self.COLOR_PANEL_ALT = "#0c0c18"     # ic kutu / log / yanit zemini
+        self.COLOR_BORDER = "#1f1f3a"        # nötr koyu border
+        self.COLOR_TEXT = "#e6f1ff"          # ana yazi (soguk beyaz)
+        self.COLOR_TEXT_DIM = "#6a7196"      # ikincil yazi
+        self.COLOR_NEON_CYAN = "#00f0ff"     # baslik / matris border / send
+        self.COLOR_NEON_PINK = "#ff2d92"     # yanit karti / stop
+        self.COLOR_NEON_GREEN = "#39ff14"    # istatistik mono / OK
+        self.COLOR_NEON_PURPLE = "#b026ff"   # ikincil aksan
+        self.COLOR_WARN = "#ff5e3a"
+
+        # Yazı tipleri
+        self.FONT_HEADER = ("Segoe UI", 24, "bold")
+        self.FONT_SUBHEADER = ("Consolas", 10)
+        self.FONT_PANEL_TITLE = ("Consolas", 10, "bold")
+        self.FONT_LABEL = ("Segoe UI", 12)
+        self.FONT_LABEL_BOLD = ("Segoe UI", 12, "bold")
+        self.FONT_YANIT_TITLE = ("Consolas", 10, "bold")
+        self.FONT_YANIT = ("Segoe UI", 20, "bold")
+        self.FONT_MONO = ("Consolas", 11)
         self.FONT_INPUT = ("Segoe UI", 14)
-        self.COLOR_BG = "#1a1a22"
-        self.COLOR_PANEL = "#22222e"
-        self.COLOR_TEXT = "#e6e6f0"
-        self.COLOR_ACCENT = "#7eb6ff"
-        self.COLOR_MONO = "#9ad0ff"
 
-        header = tk.Label(
-            self.root,
-            text="AI Body — Sergi Prototipi",
+        self.root.configure(bg=self.COLOR_BG)
+
+        # ttk stilleri — neon butonlar
+        style = ttk.Style()
+        try:
+            style.theme_use("clam")
+        except tk.TclError:
+            pass
+        for name, accent, bg_btn, hover in [
+            ("Send.TButton", self.COLOR_NEON_CYAN, "#0a1a26", "#0f2a3a"),
+            ("Stop.TButton", self.COLOR_NEON_PINK, "#1a0a18", "#2a0f24"),
+        ]:
+            style.configure(
+                name,
+                font=("Consolas", 12, "bold"),
+                padding=(20, 10),
+                background=bg_btn,
+                foreground=accent,
+                borderwidth=1,
+                bordercolor=accent,
+                focusthickness=0,
+                relief="flat",
+            )
+            style.map(
+                name,
+                background=[("active", hover), ("disabled", "#0a0a14")],
+                foreground=[("disabled", self.COLOR_TEXT_DIM)],
+                bordercolor=[("disabled", self.COLOR_BORDER)],
+            )
+
+        # ---------- KOK GRID — header / govde ----------
+        self.root.columnconfigure(0, weight=1)
+        self.root.rowconfigure(1, weight=1)
+
+        # Header — neon cyan accent
+        header = tk.Frame(self.root, bg=self.COLOR_BG)
+        header.grid(row=0, column=0, sticky="ew", padx=24, pady=(18, 6))
+        tk.Label(
+            header,
+            text="AI BODY",
             font=self.FONT_HEADER,
-            pady=14,
             bg=self.COLOR_BG,
-            fg=self.COLOR_TEXT,
-        )
-        header.pack(fill=tk.X)
+            fg=self.COLOR_NEON_CYAN,
+        ).pack(side=tk.LEFT)
+        tk.Label(
+            header,
+            text="// KONYA BİLİM MERKEZİ · SERGI PROTOTIPI",
+            font=self.FONT_SUBHEADER,
+            bg=self.COLOR_BG,
+            fg=self.COLOR_NEON_PURPLE,
+        ).pack(side=tk.LEFT, padx=(16, 0), pady=(10, 0))
 
+        # ince neon ayrac cizgisi
+        tk.Frame(self.root, bg=self.COLOR_NEON_CYAN, height=1).grid(
+            row=0, column=0, sticky="sew", padx=24, pady=(0, 0)
+        )
+
+        # Govde — 3 kolon
         body = tk.Frame(self.root, bg=self.COLOR_BG)
-        body.pack(fill=tk.BOTH, expand=True, padx=20, pady=8)
+        body.grid(row=1, column=0, sticky="nsew", padx=24, pady=12)
+        body.columnconfigure(0, weight=0, minsize=280)
+        body.columnconfigure(1, weight=1)
+        body.columnconfigure(2, weight=0, minsize=340)
+        body.rowconfigure(0, weight=1)
 
-        # ---- SOL: matris simülatörü ----
+        # ============ SOL KOLON ============
         left_col = tk.Frame(body, bg=self.COLOR_BG)
-        left_col.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 20))
-
-        matris_label = tk.Label(
-            left_col,
-            text="32×32 Matris (yazılım simülasyonu)",
-            font=("Segoe UI", 11),
-            bg=self.COLOR_BG,
-            fg="#999",
-        )
-        matris_label.pack(anchor="w", pady=(0, 6))
-        self.matrix = MatrixView(left_col, cell_size=14, padding=1)
-        self.matrix.pack()
-
-        # ---- SAĞ: kontroller ----
-        right_col = tk.Frame(body, bg=self.COLOR_BG)
-        right_col.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-        # Durum paneli
-        status = tk.LabelFrame(
-            right_col,
-            text=" Durum ",
-            padx=18,
-            pady=14,
-            font=self.FONT_PANEL_TITLE,
-            bg=self.COLOR_PANEL,
-            fg=self.COLOR_TEXT,
-            bd=2,
-        )
-        status.pack(fill=tk.X)
+        left_col.grid(row=0, column=0, sticky="nsew", padx=(0, 16))
 
         self.var_ollama = tk.StringVar(value="Ollama: ?")
         self.var_active = tk.StringVar(value="Aktif jest: idle")
-        self.var_yanit = tk.StringVar(value="AI yanıtı: —")
+        self.var_yanit = tk.StringVar(value="—")
 
+        status = self._make_panel(left_col, "// DURUM", self.COLOR_NEON_CYAN)
+        status.pack(fill=tk.X)
         for var in (self.var_ollama, self.var_active):
             tk.Label(
                 status,
@@ -147,31 +182,11 @@ class App:
                 font=self.FONT_LABEL,
                 bg=self.COLOR_PANEL,
                 fg=self.COLOR_TEXT,
-            ).pack(fill=tk.X, pady=4)
-        tk.Label(
-            status,
-            textvariable=self.var_yanit,
-            anchor="w",
-            wraplength=820,
-            justify="left",
-            font=self.FONT_YANIT,
-            bg=self.COLOR_PANEL,
-            fg=self.COLOR_ACCENT,
-        ).pack(fill=tk.X, pady=(12, 2))
+            ).pack(fill=tk.X, padx=16, pady=4)
+        tk.Frame(status, bg=self.COLOR_PANEL, height=10).pack()
 
-        # Son komut paneli
-        last = tk.LabelFrame(
-            right_col,
-            text=" Son komut ",
-            padx=18,
-            pady=14,
-            font=self.FONT_PANEL_TITLE,
-            bg=self.COLOR_PANEL,
-            fg=self.COLOR_TEXT,
-            bd=2,
-        )
+        last = self._make_panel(left_col, "// SON KOMUT", self.COLOR_NEON_PURPLE)
         last.pack(fill=tk.X, pady=(14, 0))
-
         self.var_last_id = tk.StringVar(value="jest_id: —")
         self.var_last_yog = tk.StringVar(value="yoğunluk: —")
         self.var_last_sure = tk.StringVar(value="süre: —")
@@ -183,26 +198,16 @@ class App:
                 font=self.FONT_LABEL,
                 bg=self.COLOR_PANEL,
                 fg=self.COLOR_TEXT,
-            ).pack(fill=tk.X, pady=4)
+            ).pack(fill=tk.X, padx=16, pady=4)
+        tk.Frame(last, bg=self.COLOR_PANEL, height=10).pack()
 
-        # İstatistik paneli
-        stats_frame = tk.LabelFrame(
-            right_col,
-            text=" İstatistik ",
-            padx=18,
-            pady=14,
-            font=self.FONT_PANEL_TITLE,
-            bg=self.COLOR_PANEL,
-            fg=self.COLOR_TEXT,
-            bd=2,
-        )
+        stats_frame = self._make_panel(left_col, "// İSTATİSTİK", self.COLOR_NEON_GREEN)
         stats_frame.pack(fill=tk.X, pady=(14, 0))
-
         self.var_stat_think = tk.StringVar(value="Düşünme süresi: —")
         self.var_stat_tokens = tk.StringVar(value="Token: —")
         self.var_stat_speed = tk.StringVar(value="Üretim hızı: —")
         self.var_stat_ram = tk.StringVar(
-            value="RAM: psutil yok (pip install psutil)" if not HAS_PSUTIL else "RAM: hesaplanıyor…"
+            value="RAM: psutil yok" if not HAS_PSUTIL else "RAM: hesaplanıyor…"
         )
         for var in (self.var_stat_think, self.var_stat_tokens, self.var_stat_speed, self.var_stat_ram):
             tk.Label(
@@ -211,42 +216,142 @@ class App:
                 anchor="w",
                 font=self.FONT_MONO,
                 bg=self.COLOR_PANEL,
-                fg=self.COLOR_MONO,
-            ).pack(fill=tk.X, pady=3)
+                fg=self.COLOR_NEON_GREEN,
+            ).pack(fill=tk.X, padx=16, pady=3)
+        tk.Frame(stats_frame, bg=self.COLOR_PANEL, height=10).pack()
 
-        # Giriş satırı
-        input_frame = tk.Frame(right_col, bg=self.COLOR_BG)
-        input_frame.pack(fill=tk.X, pady=(18, 0))
-        self.entry = tk.Entry(input_frame, font=self.FONT_INPUT, relief=tk.FLAT, bd=4)
-        self.entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 12), ipady=8)
-        self.entry.bind("<Return>", lambda _e: self._on_send())
-        self.btn = ttk.Button(input_frame, text="Gönder", command=self._on_send)
-        self.btn.pack(side=tk.LEFT, ipadx=10)
-        self.btn_stop = ttk.Button(input_frame, text="Durdur", command=self._on_stop)
-        self.btn_stop.pack(side=tk.LEFT, ipadx=10, padx=(8, 0))
-        self.btn_stop.configure(state=tk.DISABLED)
+        # ============ ORTA KOLON — etiket / matris / input / yanit ============
+        center_col = tk.Frame(body, bg=self.COLOR_BG)
+        center_col.grid(row=0, column=1, sticky="nsew", padx=8)
+        center_col.columnconfigure(0, weight=1)
+        # Dikey: 0 etiket | 1 matris (esnek) | 2 input bar | 3 yanit
+        center_col.rowconfigure(0, weight=0)
+        center_col.rowconfigure(1, weight=1)
+        center_col.rowconfigure(2, weight=0)
+        center_col.rowconfigure(3, weight=0)
 
-        # Log
-        log_frame = tk.LabelFrame(
-            right_col,
-            text=" Log ",
-            padx=10,
-            pady=8,
+        # ust etiket
+        tk.Label(
+            center_col,
+            text="// TEPKİ EKRANI · 32×32",
             font=self.FONT_PANEL_TITLE,
+            bg=self.COLOR_BG,
+            fg=self.COLOR_NEON_CYAN,
+        ).grid(row=0, column=0, pady=(0, 8))
+
+        # matris — kare neon cyan border icinde, ortalanmis
+        matrix_wrap = tk.Frame(center_col, bg=self.COLOR_BG)
+        matrix_wrap.grid(row=1, column=0)
+        matrix_frame = tk.Frame(
+            matrix_wrap,
+            bg=self.COLOR_BG,
+            highlightbackground=self.COLOR_NEON_CYAN,
+            highlightthickness=2,
+        )
+        matrix_frame.pack()
+        # cell_size=17 → 17*32 + 33 = 577 px (kare). pencere yuksekligine sigar.
+        # Matris LED renkleri gesture_engine'den geliyor; UI temasi onlari etkilemez.
+        self.matrix = MatrixView(matrix_frame, cell_size=17, padding=1)
+        self.matrix.pack()
+
+        # ============ INPUT BAR — orta kolonda yanit ustunde ============
+        input_bar = tk.Frame(center_col, bg=self.COLOR_BG)
+        input_bar.grid(row=2, column=0, sticky="ew", pady=(16, 0))
+        input_bar.columnconfigure(0, weight=1)
+
+        entry_wrap = tk.Frame(
+            input_bar,
+            bg=self.COLOR_PANEL,
+            highlightbackground=self.COLOR_NEON_CYAN,
+            highlightthickness=1,
+        )
+        entry_wrap.grid(row=0, column=0, sticky="ew", padx=(0, 12))
+        self.entry = tk.Entry(
+            entry_wrap,
+            font=self.FONT_INPUT,
+            relief=tk.FLAT,
+            bd=0,
             bg=self.COLOR_PANEL,
             fg=self.COLOR_TEXT,
-            bd=2,
+            insertbackground=self.COLOR_NEON_CYAN,
         )
-        log_frame.pack(fill=tk.BOTH, expand=True, pady=(14, 0))
+        self.entry.pack(fill=tk.X, padx=14, pady=10)
+        self.entry.bind("<Return>", lambda _e: self._on_send())
+
+        self.btn = ttk.Button(input_bar, text="GÖNDER", style="Send.TButton", command=self._on_send)
+        self.btn.grid(row=0, column=1)
+        self.btn_stop = ttk.Button(input_bar, text="DURDUR", style="Stop.TButton", command=self._on_stop)
+        self.btn_stop.grid(row=0, column=2, padx=(8, 0))
+        self.btn_stop.configure(state=tk.DISABLED)
+
+        # ============ YANIT KARTI — input altinda, neon pink border ============
+        yanit_card = tk.Frame(
+            center_col,
+            bg=self.COLOR_PANEL_ALT,
+            highlightbackground=self.COLOR_NEON_PINK,
+            highlightthickness=1,
+        )
+        yanit_card.grid(row=3, column=0, sticky="ew", pady=(14, 0))
+        tk.Label(
+            yanit_card,
+            text="// AI YANITI",
+            font=self.FONT_YANIT_TITLE,
+            bg=self.COLOR_PANEL_ALT,
+            fg=self.COLOR_NEON_PINK,
+        ).pack(anchor="w", padx=20, pady=(12, 4))
+        tk.Label(
+            yanit_card,
+            textvariable=self.var_yanit,
+            font=self.FONT_YANIT,
+            bg=self.COLOR_PANEL_ALT,
+            fg=self.COLOR_TEXT,
+            wraplength=720,
+            justify="center",
+            anchor="center",
+        ).pack(fill=tk.X, padx=24, pady=(0, 18))
+
+        # ============ SAG KOLON — log ============
+        right_col = tk.Frame(body, bg=self.COLOR_BG)
+        right_col.grid(row=0, column=2, sticky="nsew", padx=(16, 0))
+
+        log_frame = self._make_panel(right_col, "// OLAY KAYDI", self.COLOR_NEON_GREEN)
+        log_frame.pack(fill=tk.BOTH, expand=True)
         self.log_box = scrolledtext.ScrolledText(
-            log_frame, height=12, font=("Consolas", 11),
-            bg="#0e0e16", fg="#c8c8d4", insertbackground="#c8c8d4",
-            relief=tk.FLAT, bd=4,
+            log_frame,
+            height=18,
+            font=("Consolas", 10),
+            bg=self.COLOR_PANEL_ALT,
+            fg=self.COLOR_NEON_GREEN,
+            insertbackground=self.COLOR_NEON_GREEN,
+            relief=tk.FLAT,
+            bd=0,
+            padx=12,
+            pady=10,
         )
-        self.log_box.pack(fill=tk.BOTH, expand=True)
+        self.log_box.pack(fill=tk.BOTH, expand=True, padx=8, pady=(0, 8))
         self.log_box.configure(state=tk.DISABLED)
 
         self.entry.focus_set()
+
+    def _make_panel(self, parent: tk.Misc, title: str, accent: str) -> tk.Frame:
+        """Neon vurgu cizgili panel: ustte renkli baslik + ince border."""
+        outer = tk.Frame(
+            parent,
+            bg=self.COLOR_PANEL,
+            highlightbackground=self.COLOR_BORDER,
+            highlightthickness=1,
+        )
+        tk.Label(
+            outer,
+            text=title,
+            font=self.FONT_PANEL_TITLE,
+            bg=self.COLOR_PANEL,
+            fg=accent,
+            anchor="w",
+        ).pack(fill=tk.X, padx=16, pady=(12, 4))
+        # ince renkli ayrac
+        tk.Frame(outer, bg=accent, height=1).pack(fill=tk.X, padx=16, pady=(0, 8))
+        return outer
 
     def _append_log(self, line: str) -> None:
         self.log_box.configure(state=tk.NORMAL)
@@ -332,7 +437,7 @@ class App:
             else:
                 msg = f"Hata: {err}"
             self.var_active.set("Aktif jest: idle")
-            self.var_yanit.set(f"AI yanıtı: ⚠ {msg}")
+            self.var_yanit.set(f"⚠ {msg}")
             meta = detail.get("meta")
             if meta:
                 self._update_stats(meta)
@@ -351,7 +456,7 @@ class App:
             # sure_sn=None -> jest sonsuza kadar oynar, Durdur ile biter
             triggered = self.engine.trigger(r["jest_id"], r["yogunluk"], sure_sn=None)
             self.var_active.set(f"Aktif jest: {r['jest_id']}")
-            self.var_yanit.set(f"AI yanıtı: {r['yanit']}")
+            self.var_yanit.set(r["yanit"] if r.get("yanit") else "—")
             self.var_last_id.set(f"jest_id: {r['jest_id']}")
             self.var_last_yog.set(f"yoğunluk: {r['yogunluk']:.2f}")
             self.var_last_sure.set("süre: süresiz (Durdur ile biter)")

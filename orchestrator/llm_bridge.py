@@ -19,6 +19,7 @@ class LLMBridge:
         self.model = config["ollama_model"]
         self.timeout = float(config.get("request_timeout_sec", 20))
         self.use_baked_prompt = bool(config.get("use_baked_prompt", False))
+        self.history_max_turns = int(config.get("history_max_turns", 6))
 
         prompt_path = (base_dir / config["system_prompt_path"]).resolve()
         gestures_path = (base_dir / config["gestures_path"]).resolve()
@@ -26,9 +27,29 @@ class LLMBridge:
 
         gdata = json.loads(gestures_path.read_text(encoding="utf-8"))
         self.valid_ids = {g["id"] for g in gdata["jestler"]}
+
+        # Yapilandirilmis cikti semasi — Ollama'da jest_id'yi enum'a kilitler,
+        # gecersiz jest uretme ihtimalini sifirlar.
+        self._format_schema = {
+            "type": "object",
+            "properties": {
+                "jest_id": {"type": "string", "enum": sorted(self.valid_ids)},
+                "yogunluk": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                "yanit": {"type": "string", "maxLength": 200},
+            },
+            "required": ["jest_id", "yogunluk", "yanit"],
+        }
+
+        # Konusma gecmisi — son N turun user/assistant ciftleri tutulur.
+        self._history: list[dict] = []
+
         mode = "baked (modele gömülü)" if self.use_baked_prompt else "her istek (api üzerinden)"
-        log.info("LLMBridge hazır — %d jest, model=%s, sistem promptu=%s",
-                 len(self.valid_ids), self.model, mode)
+        log.info("LLMBridge hazır — %d jest, model=%s, sistem promptu=%s, history=%d tur",
+                 len(self.valid_ids), self.model, mode, self.history_max_turns)
+
+    def clear_history(self) -> None:
+        """Konusma gecmisini sifirla (yeni oturum/konu icin)."""
+        self._history.clear()
 
     def is_alive(self) -> bool:
         # Iki defaya kadar dene; ilk istek bazen geç gelir (Ollama henuz hazirlanir)
@@ -50,6 +71,8 @@ class LLMBridge:
         messages: list[dict] = []
         if not self.use_baked_prompt:
             messages.append({"role": "system", "content": self.system_prompt})
+        # Onceki turlar — modelin bagi kaybetmemesi icin son N user/assistant cifti
+        messages.extend(self._history)
         messages.append({"role": "user", "content": user_text})
 
         try:
@@ -59,7 +82,7 @@ class LLMBridge:
                     "model": self.model,
                     "messages": messages,
                     "stream": False,
-                    "format": "json",
+                    "format": self._format_schema,
                     "options": {
                         "temperature": 0.2,
                         "top_p": 0.9,
@@ -116,4 +139,17 @@ class LLMBridge:
         yog = max(0.0, min(1.0, yog))
 
         yanit = str(parsed.get("yanit", "")).strip()
+
+        # Basarili turu gecmise yaz — assistant turunu tam JSON olarak sakliyoruz
+        # ki model formati ve onceki kararlarini tutarli sekilde gorsun.
+        assistant_payload = json.dumps(
+            {"jest_id": jest_id, "yogunluk": yog, "yanit": yanit},
+            ensure_ascii=False,
+        )
+        self._history.append({"role": "user", "content": user_text})
+        self._history.append({"role": "assistant", "content": assistant_payload})
+        limit = self.history_max_turns * 2
+        if len(self._history) > limit:
+            self._history = self._history[-limit:]
+
         return {"jest_id": jest_id, "yogunluk": yog, "yanit": yanit, "meta": meta}
