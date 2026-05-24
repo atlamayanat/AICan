@@ -1,18 +1,28 @@
-"""Yazılım simülatörü — 22 desen ve idle nefes.
+"""96×96 yazılım LED matrisi simülatörü — 40+ desen ve idle nefes.
 
-Mantık `src/main.cpp` içindeki firmware ile birebir aynı (XY haritalama, renk
-ölçekleme, hız çarpanları, idle animasyonu). Donanım yerine bir 16×16 piksel
-buffer'a yazıyor; UI tarafı bu buffer'ı renderler.
+Bir piksel buffer'ı (W*H tuple) tutar; UI tarafı (matrix_sim) her frame buffer'ı renderler.
+Her sembol (kalp, yüz, el, soru işareti vs.) 96×96 ızgarada elle çizilmiş veya
+parametrik üretilmiştir; jenerik desenler (pulse, wave, ripple) sin/cos tabanlıdır.
 """
 from __future__ import annotations
 
 import math
 import random
 import time
+from pathlib import Path
 from typing import Optional
 
-W, H = 32, 32
-CX, CY = 15.5, 15.5
+from PIL import Image
+
+W, H = 96, 96
+CX, CY = 47.5, 47.5
+
+# Emoji frame'leri saniyede kac kare oynatilacak — prepare_emojis.py FPS ile esit olmali
+EMOJI_FPS = 12
+
+# assets/emojis/<jest_id>/frame_NN.png yolu icin proje koku
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_EMOJI_BASE_DIR = _PROJECT_ROOT / "assets" / "emojis"
 
 SPEED_MULTS = (0.4, 0.7, 1.0, 1.5, 2.5)
 SPEED_NAME_TO_ID = {
@@ -35,7 +45,7 @@ def _scale8(c: tuple[int, int, int], factor: int) -> tuple[int, int, int]:
 
 
 class Buffer:
-    """16×16 piksel buffer'ı (firmware'deki CRGB leds[] eşdeğeri)."""
+    """96×96 piksel buffer'i."""
 
     def __init__(self) -> None:
         self.pixels: list[tuple[int, int, int]] = [(0, 0, 0)] * (W * H)
@@ -57,8 +67,8 @@ class Buffer:
             self.pixels[i] = _scale8(self.pixels[i], factor)
 
 
-# ============== Desen fonksiyonlari ==============
-# Tum imza: (buf, t_sec, r,g,b, r2,g2,b2, intensity, speed_mult)
+# ============== Jenerik desenler ==============
+# Imza: (buf, t_sec, r,g,b, r2,g2,b2, intensity, speed_mult)
 
 
 def pat_pulse(buf, t, r, g, b, r2, g2, b2, intensity, speed_mult):
@@ -70,7 +80,7 @@ def pat_pulse(buf, t, r, g, b, r2, g2, b2, intensity, speed_mult):
 def _wave(buf, t, r, g, b, intensity, speed_mult, vertical, reverse):
     pos = (t * 0.6 * speed_mult) % 1.0
     bound = H if vertical else W
-    band = 6
+    band = 18
     head = (1 - pos) * (bound + band) - 1 if reverse else pos * (bound + band) - band + 1
     buf.clear()
     for d in range(band):
@@ -107,9 +117,9 @@ def _ripple(buf, t, r, g, b, intensity, speed_mult, out):
     pos = (t * 1.0 * speed_mult) % 1.0
     if not out:
         pos = 1.0 - pos
-    radius = pos * 22.0
+    radius = pos * 66.0
     buf.clear()
-    band_w = 2.5
+    band_w = 7.5
     for y in range(H):
         for x in range(W):
             d = math.sqrt((x - CX) ** 2 + (y - CY) ** 2)
@@ -130,30 +140,43 @@ def pat_ripple_in(buf, t, r, g, b, r2, g2, b2, intensity, speed_mult):
 def pat_sparkle(buf, t, r, g, b, r2, g2, b2, intensity, speed_mult):
     buf.fade_all(220)
     has_second = (r2 + g2 + b2) > 0
-    n = int(8 + 18 * speed_mult)
+    n = int(70 + 160 * speed_mult)
     for _ in range(n):
         if random.randint(0, 99) >= 50:
             continue
-        x = random.randint(0, W - 1)
-        y = random.randint(0, H - 1)
+        x = random.randint(0, W - 2)
+        y = random.randint(0, H - 2)
         if has_second and random.randint(0, 1) == 0:
             cr, cg, cb = r2, g2, b2
         else:
             cr, cg, cb = r, g, b
         k = intensity * (0.55 + random.random() * 0.45)
-        buf.set(x, y, _scale(cr, cg, cb, k))
+        c = _scale(cr, cg, cb, k)
+        for dx in (0, 1):
+            for dy in (0, 1):
+                buf.set(x + dx, y + dy, c)
 
 
 def pat_drop(buf, t, r, g, b, r2, g2, b2, intensity, speed_mult):
     buf.fade_all(200)
-    xs = (5, 11, 16, 21, 27)
+    xs = (15, 33, 48, 63, 81)
     for k_idx, x in enumerate(xs):
         phase = (t * 0.45 * speed_mult + k_idx * 0.2) % 1.0
-        y = int(phase * (H + 3)) - 1
+        y = int(phase * (H + 9)) - 3
         if 0 <= y < H:
-            buf.set(x, y, _scale(r, g, b, intensity))
-            if y + 1 < H:
-                buf.set(x, y + 1, _scale(r, g, b, intensity * 0.6))
+            c_main = _scale(r, g, b, intensity)
+            c_dim = _scale(r, g, b, intensity * 0.55)
+            for dx in (-1, 0, 1):
+                buf.set(x + dx, y, c_main)
+                buf.set(x + dx, y + 1, c_main)
+            for trail in range(2, 5):
+                yy = y + trail
+                if yy < H:
+                    k = intensity * (0.6 - 0.12 * trail)
+                    c_t = _scale(r, g, b, k)
+                    buf.set(x, yy, c_t)
+                    buf.set(x - 1, yy, c_dim if trail == 2 else c_t)
+                    buf.set(x + 1, yy, c_dim if trail == 2 else c_t)
 
 
 def pat_fade(buf, t, r, g, b, r2, g2, b2, intensity, speed_mult):
@@ -169,8 +192,11 @@ def pat_scan(buf, t, r, g, b, r2, g2, b2, intensity, speed_mult):
     buf.clear()
     if 0 <= y < H:
         c = _scale(r, g, b, intensity)
-        for x in range(W):
-            buf.set(x, y, c)
+        for dy in (-1, 0, 1):
+            yy = y + dy
+            if 0 <= yy < H:
+                for x in range(W):
+                    buf.set(x, yy, c)
 
 
 def pat_static_glow(buf, t, r, g, b, r2, g2, b2, intensity, speed_mult):
@@ -181,9 +207,9 @@ def pat_static_glow(buf, t, r, g, b, r2, g2, b2, intensity, speed_mult):
 
 def pat_three_dots(buf, t, r, g, b, r2, g2, b2, intensity, speed_mult):
     buf.clear()
-    dots = (8, 16, 24)
-    y = 16
-    radius = 2  # 32x32 icin daha buyuk nokta (5x5 alan)
+    dots = (24, 48, 72)
+    y = 48
+    radius = 6
     for i, dx in enumerate(dots):
         phase = t * 1.2 * speed_mult - i * 0.33
         w = (math.sin(2 * math.pi * phase) + 1) * 0.5
@@ -200,20 +226,21 @@ def pat_three_dots(buf, t, r, g, b, r2, g2, b2, intensity, speed_mult):
 def pat_spiral_out(buf, t, r, g, b, r2, g2, b2, intensity, speed_mult):
     buf.fade_all(220)
     angle = t * 4.0 * speed_mult
-    radius = ((t * speed_mult) % 1.0) * 18.0
-    # Daha kalin iz - 2x2 piksel
+    radius = ((t * speed_mult) % 1.0) * 54.0
     cx = CX + radius * math.cos(angle)
     cy = CY + radius * math.sin(angle)
     c = _scale(r, g, b, intensity)
-    for dx in (0, 1):
-        for dy in (0, 1):
-            buf.set(int(cx + dx), int(cy + dy), c)
+    # 5x5 iz disk
+    for dx in range(-2, 3):
+        for dy in range(-2, 3):
+            if dx * dx + dy * dy <= 5:
+                buf.set(int(cx + dx), int(cy + dy), c)
 
 
 def pat_shake(buf, t, r, g, b, r2, g2, b2, intensity, speed_mult):
     buf.clear()
-    ox = random.randint(-2, 2)
-    oy = random.randint(-2, 2)
+    ox = random.randint(-6, 6)
+    oy = random.randint(-6, 6)
     c = _scale(r, g, b, intensity * 0.85)
     for y in range(H):
         for x in range(W):
@@ -223,8 +250,8 @@ def pat_shake(buf, t, r, g, b, r2, g2, b2, intensity, speed_mult):
 def pat_diagonal_sweep(buf, t, r, g, b, r2, g2, b2, intensity, speed_mult):
     buf.clear()
     pos = (t * 0.4 * speed_mult) % 1.0
-    offset = pos * 62.0 - 4.0  # 32x32 icin (2*W+offset)
-    band = 4.0
+    offset = pos * 198.0 - 12.0
+    band = 12.0
     for y in range(H):
         for x in range(W):
             d = abs((x + y) - offset)
@@ -250,9 +277,13 @@ def pat_cross(buf, t, r, g, b, r2, g2, b2, intensity, speed_mult):
     w = (math.sin(2 * math.pi * t * 0.7 * speed_mult) + 1) * 0.5
     k = intensity * (0.5 + 0.5 * w)
     c = _scale(r, g, b, k)
+    # 3 piksel kalin diagonal X
     for i in range(W):
-        buf.set(i, i, c)
-        buf.set(i, H - 1 - i, c)
+        for d in (-1, 0, 1):
+            buf.set(i + d, i, c)
+            buf.set(i, i + d, c)
+            buf.set(i + d, H - 1 - i, c)
+            buf.set(i, H - 1 - i + d, c)
 
 
 def pat_border_only(buf, t, r, g, b, r2, g2, b2, intensity, speed_mult):
@@ -260,48 +291,48 @@ def pat_border_only(buf, t, r, g, b, r2, g2, b2, intensity, speed_mult):
     w = (math.sin(2 * math.pi * t * 0.5 * speed_mult) + 1) * 0.5
     k = intensity * (0.55 + 0.45 * w)
     c = _scale(r, g, b, k)
-    for x in range(W):
-        buf.set(x, 0, c)
-        buf.set(x, H - 1, c)
-    for y in range(1, H - 1):
-        buf.set(0, y, c)
-        buf.set(W - 1, y, c)
+    # 3 piksel kalin cerceve
+    for thick in range(3):
+        for x in range(W):
+            buf.set(x, thick, c)
+            buf.set(x, H - 1 - thick, c)
+        for y in range(thick + 1, H - 1 - thick):
+            buf.set(thick, y, c)
+            buf.set(W - 1 - thick, y, c)
 
 
 def pat_split(buf, t, r, g, b, r2, g2, b2, intensity, speed_mult):
     buf.clear()
     pos = (t * 0.5 * speed_mult) % 1.0
-    gap = int(pos * 15)
-    top, bot = 15 - gap, 16 + gap
+    gap = int(pos * 45)
+    top, bot = 47 - gap, 48 + gap
     c = _scale(r, g, b, intensity)
-    if top >= 0:
-        for x in range(W):
-            buf.set(x, top, c)
-            buf.set(x, max(0, top - 1), c)
-    if bot < H:
-        for x in range(W):
-            buf.set(x, bot, c)
-            buf.set(x, min(H - 1, bot + 1), c)
+    for delta in (-1, 0, 1):
+        ty = top + delta
+        by = bot + delta
+        if 0 <= ty < H:
+            for x in range(W):
+                buf.set(x, ty, c)
+        if 0 <= by < H:
+            for x in range(W):
+                buf.set(x, by, c)
 
 
 def _plot_seg(buf, x0, y0, x1, y1, prog, c, thickness=1):
+    """Kalın çizgi segmenti — kare fırça boyutu = thickness."""
     dx, dy = x1 - x0, y1 - y0
     steps = max(abs(dx), abs(dy))
     if steps == 0:
         buf.set(x0, y0, c)
         return
     n = min(int(prog * steps + 0.5), steps)
+    half = thickness // 2
     for i in range(n + 1):
         x = int(x0 + dx * i / steps + 0.5)
         y = int(y0 + dy * i / steps + 0.5)
-        buf.set(x, y, c)
-        # Thicker line for 32x32 visibility
-        if thickness >= 2:
-            buf.set(x + 1, y, c)
-            buf.set(x, y + 1, c)
-        if thickness >= 3:
-            buf.set(x - 1, y, c)
-            buf.set(x, y - 1, c)
+        for tx in range(-half, thickness - half):
+            for ty in range(-half, thickness - half):
+                buf.set(x + tx, y + ty, c)
 
 
 def pat_checkmark(buf, t, r, g, b, r2, g2, b2, intensity, speed_mult):
@@ -314,9 +345,9 @@ def pat_checkmark(buf, t, r, g, b, r2, g2, b2, intensity, speed_mult):
         p1, p2 = 1.0, 1.0
     buf.clear()
     c = _scale(r, g, b, intensity)
-    # 32x32 olceginde ✓ : (6,18) -> (14,26) -> (26,8)
-    _plot_seg(buf, 6, 18, 14, 26, p1, c, thickness=3)
-    _plot_seg(buf, 14, 26, 26, 8, p2, c, thickness=3)
+    # 96x96 ✓ : kisa kol (18, 54) → (42, 78); uzun kol (42, 78) → (78, 24)
+    _plot_seg(buf, 18, 54, 42, 78, p1, c, thickness=8)
+    _plot_seg(buf, 42, 78, 78, 24, p2, c, thickness=8)
 
 
 def pat_x_mark(buf, t, r, g, b, r2, g2, b2, intensity, speed_mult):
@@ -329,43 +360,32 @@ def pat_x_mark(buf, t, r, g, b, r2, g2, b2, intensity, speed_mult):
         p1, p2 = 1.0, 1.0
     buf.clear()
     c = _scale(r, g, b, intensity)
-    # 32x32 olceginde ✗ : kosegenler (6,6)-(25,25) ve (25,6)-(6,25)
-    _plot_seg(buf, 6, 6, 25, 25, p1, c, thickness=3)
-    _plot_seg(buf, 25, 6, 6, 25, p2, c, thickness=3)
+    # 96x96 ✗ : kosegenler (18, 18)-(77, 77) ve (77, 18)-(18, 77)
+    _plot_seg(buf, 18, 18, 77, 77, p1, c, thickness=8)
+    _plot_seg(buf, 77, 18, 18, 77, p2, c, thickness=8)
 
 
-# --- Sembolik şekil pikselleri ---
+# ============== Sembol piksel setleri (96×96) ==============
+
 
 def _build_heart() -> tuple[tuple[int, int], ...]:
-    """32x32 olceginde dolu kalp sekli."""
+    """96×96 dolu kalp — iki tepe disk + V tabani, ortada hafif çentik."""
     pts: set[tuple[int, int]] = set()
-    # Iki ust tumsek (rows 3-5, ayri ayri)
-    for x in range(5, 11):
-        pts.add((x, 3))
-    for x in range(21, 27):
-        pts.add((x, 3))
-    for x in range(4, 13):
-        pts.add((x, 4))
-    for x in range(19, 28):
-        pts.add((x, 4))
-    for x in range(3, 14):
-        pts.add((x, 5))
-    for x in range(18, 29):
-        pts.add((x, 5))
-    # Birlesme noktasi
-    for x in range(3, 29):
-        pts.add((x, 6))
-    # Tam genislik (rows 7-9)
-    for y in (7, 8, 9):
-        for x in range(2, 30):
-            pts.add((x, y))
-    # Asagiya dogru daralma (rows 10-22)
-    narrow = [
-        (3, 28), (4, 27), (5, 26), (6, 25), (7, 24), (8, 23),
-        (9, 22), (10, 21), (11, 20), (12, 19), (13, 18), (14, 17), (15, 16),
-    ]
-    for i, (left, right) in enumerate(narrow):
-        y = 10 + i
+    # Iki ust tumsek (cember dolgu)
+    for cx_b, cy_b, rad in [(28, 30, 22), (68, 30, 22)]:
+        for y in range(max(0, cy_b - rad), min(H, cy_b + rad + 1)):
+            dy = y - cy_b
+            half = int(math.sqrt(rad * rad - dy * dy))
+            for x in range(max(0, cx_b - half), min(W, cx_b + half + 1)):
+                pts.add((x, y))
+    # V tabani: y=30 tam genis → y=86 tek nokta
+    for y in range(30, 87):
+        if y < 44:
+            left, right = 6, 89
+        else:
+            t = (y - 44) / 42.0
+            left = int(6 + (48 - 6) * t)
+            right = int(89 - (89 - 48) * t)
         for x in range(left, right + 1):
             pts.add((x, y))
     return tuple(sorted(pts))
@@ -373,29 +393,52 @@ def _build_heart() -> tuple[tuple[int, int], ...]:
 
 HEART_PIXELS = _build_heart()
 
-def _build_question_body() -> tuple[tuple[int, int], ...]:
-    """32x32 olceginde soru isareti govdesi."""
-    pts: set[tuple[int, int]] = set()
-    # Ust kavis (rows 4-7)
-    for x in range(10, 22):
-        pts.add((x, 4))
-        pts.add((x, 5))
-    for y in range(6, 9):
-        pts.add((9, y)); pts.add((10, y))
-        pts.add((21, y)); pts.add((22, y))
-    # Sag kenar asagiya egilim
-    for y, (a, b) in zip(range(9, 16), [(20, 22), (19, 21), (18, 20), (17, 19), (16, 18), (15, 17), (15, 16)]):
-        for x in range(a, b + 1):
+
+def _stamp_disk(pts: set, cx: int, cy: int, radius: int) -> None:
+    for y in range(cy - radius, cy + radius + 1):
+        for x in range(cx - radius, cx + radius + 1):
+            if (x - cx) ** 2 + (y - cy) ** 2 <= radius * radius:
+                pts.add((x, y))
+
+
+def _stamp_square(pts: set, cx: int, cy: int, half: int) -> None:
+    """Kare firca - disk gibi tek piksel uca dejenere olmaz."""
+    for y in range(cy - half, cy + half + 1):
+        for x in range(cx - half, cx + half + 1):
             pts.add((x, y))
-    # Dikey govde (rows 16-22)
-    for y in range(16, 22):
-        for x in range(14, 18):
+
+
+def _build_question_body() -> tuple[tuple[int, int], ...]:
+    """96×96 soru işareti gövdesi — üst yuvarlak kanca + dikey indirgemeli."""
+    pts: set[tuple[int, int]] = set()
+    cx_arc, cy_arc = 48, 26
+    arc_r = 17
+    # Ust kanca: 180° (sol) → tepe (270°) → 0° (sag) → 315° (sag-alt)
+    n_samples = 80
+    for i in range(n_samples):
+        # angle 180° (math.pi) ile -45° (-math.pi/4) arasi (saat yonunde)
+        a = math.pi - (i / (n_samples - 1)) * (math.pi * 1.25)
+        x = cx_arc + arc_r * math.cos(a)
+        y = cy_arc - arc_r * math.sin(a)
+        _stamp_square(pts, round(x), round(y), 5)
+    # Kanca sonundan (yaklasik 60, 38) dikey govdeye (48, 56) gecis
+    for i in range(22):
+        t = i / 21
+        x = round(60 * (1 - t) + 48 * t)
+        y = round(38 * (1 - t) + 56 * t)
+        _stamp_square(pts, x, y, 5)
+    # Dikey govde - 10 piksel genis (43-52), rows 54-72
+    for y in range(54, 73):
+        for x in range(43, 53):
             pts.add((x, y))
     return tuple(sorted(pts))
 
 
 def _build_question_dot() -> tuple[tuple[int, int], ...]:
-    return tuple((x, y) for y in range(25, 29) for x in range(14, 18))
+    """96×96 soru noktasi - 11x11 disk, rows 78-89."""
+    pts: set[tuple[int, int]] = set()
+    _stamp_disk(pts, 48, 83, 6)
+    return tuple(sorted(pts))
 
 
 QUESTION_BODY = _build_question_body()
@@ -428,14 +471,13 @@ def pat_heart(buf, t, r, g, b, r2, g2, b2, intensity, speed_mult):
 
 
 def pat_question_mark(buf, t, r, g, b, r2, g2, b2, intensity, speed_mult):
-    """Soru işareti — gövde yumuşak nefes alır, alttaki nokta ayrı blink yapar."""
+    """Soru işareti — gövde yumuşak nefes, nokta ayrı blink."""
     buf.clear()
     body_w = (math.sin(2 * math.pi * t * 0.5 * speed_mult) + 1) * 0.5
     k_body = intensity * (0.55 + 0.30 * body_w)
     c_body = _scale(r, g, b, k_body)
     for (x, y) in QUESTION_BODY:
         buf.set(x, y, c_body)
-
     dot_phase = (t * 0.7 * speed_mult) % 1.0
     if dot_phase < 0.55:
         k_dot = intensity * (0.85 + 0.15 * math.sin(math.pi * dot_phase / 0.55))
@@ -447,10 +489,10 @@ def pat_question_mark(buf, t, r, g, b, r2, g2, b2, intensity, speed_mult):
 
 
 def pat_question_shake(buf, t, r, g, b, r2, g2, b2, intensity, speed_mult):
-    """Sallanan soru işareti — kafası karışmış 'anlamadım' hissi."""
+    """Sallanan soru işareti — 'anlamadım' hissi."""
     buf.clear()
-    ox = random.randint(-1, 1)
-    oy = random.randint(-1, 1)
+    ox = random.randint(-3, 3)
+    oy = random.randint(-3, 3)
     body_w = (math.sin(2 * math.pi * t * 0.7 * speed_mult) + 1) * 0.5
     k_body = intensity * (0.50 + 0.30 * body_w)
     c_body = _scale(r, g, b, k_body)
@@ -466,18 +508,23 @@ def pat_question_shake(buf, t, r, g, b, r2, g2, b2, intensity, speed_mult):
         buf.set(x + ox, y + oy, c_dot)
 
 
-# --- Yıldız (compass rose / 8-point starburst) ---
+# --- Yildiz (8-uclu compass rose) ---
 
 def _build_star() -> tuple[tuple[int, int], ...]:
-    """32x32 olceginde 8-uclu yildiz: dikey + yatay cubuk + iki capraz."""
+    """96×96 8-uclu yildiz: kalin dikey + yatay cubuk + iki capraz."""
     pts: set[tuple[int, int]] = set()
-    for y in range(H):
-        pts.add((15, y)); pts.add((16, y))
-    for x in range(W):
-        pts.add((x, 15)); pts.add((x, 16))
+    # Dikey + yatay cubuklar (6 piksel kalin)
     for i in range(H):
-        pts.add((i, i))
-        pts.add((H - 1 - i, i))
+        for d in range(45, 51):
+            pts.add((d, i))
+            pts.add((i, d))
+    # Diyagonaller (5 piksel kalin)
+    for i in range(H):
+        for d in range(-2, 3):
+            if 0 <= i + d < W:
+                pts.add((i + d, i))
+            if 0 <= H - 1 - i + d < W:
+                pts.add((H - 1 - i + d, i))
     return tuple(sorted(pts))
 
 
@@ -485,7 +532,7 @@ STAR_PIXELS = _build_star()
 
 
 def pat_star(buf, t, r, g, b, r2, g2, b2, intensity, speed_mult):
-    """Yıldız — gövde nefes alır, etrafa rastgele ikincil renkte parıltı saçar."""
+    """Yildiz — gövde nefes alir, etrafa rastgele ikincil renkte parilti."""
     buf.clear()
     pulse = (math.sin(2 * math.pi * t * 0.5 * speed_mult) + 1) * 0.5
     k = intensity * (0.55 + 0.45 * pulse)
@@ -494,24 +541,27 @@ def pat_star(buf, t, r, g, b, r2, g2, b2, intensity, speed_mult):
         buf.set(x, y, c)
     has_second = (r2 + g2 + b2) > 0
     if has_second:
-        n = int(2 + 4 * speed_mult)
+        n = int(8 + 16 * speed_mult)
         for _ in range(n):
             if random.randint(0, 99) >= 35:
                 continue
-            x = random.randint(0, W - 1)
-            y = random.randint(0, H - 1)
+            x = random.randint(0, W - 2)
+            y = random.randint(0, H - 2)
             k_sp = intensity * (0.6 + random.random() * 0.4)
-            buf.set(x, y, _scale(r2, g2, b2, k_sp))
+            c2 = _scale(r2, g2, b2, k_sp)
+            for dx in (0, 1):
+                for dy in (0, 1):
+                    buf.set(x + dx, y + dy, c2)
 
 
-# --- Ünlem işareti ---
+# --- Unlem isareti ---
 
-EXCLAMATION_BODY = tuple((x, y) for y in range(3, 21) for x in range(13, 19))
-EXCLAMATION_DOT = tuple((x, y) for y in range(24, 29) for x in range(13, 19))
+EXCLAMATION_BODY = tuple((x, y) for y in range(8, 60) for x in range(41, 55))
+EXCLAMATION_DOT = tuple((x, y) for y in range(70, 85) for x in range(41, 55))
 
 
 def pat_exclamation(buf, t, r, g, b, r2, g2, b2, intensity, speed_mult):
-    """Ünlem — başlangıçta keskin flash, sonra hızlı pulse."""
+    """Unlem - baslangicta keskin flash, sonra hizli pulse."""
     buf.clear()
     cycle = (t * 1.0 * speed_mult) % 1.0
     if cycle < 0.10:
@@ -529,43 +579,53 @@ def pat_exclamation(buf, t, r, g, b, r2, g2, b2, intensity, speed_mult):
         buf.set(x, y, c_dot)
 
 
-# --- Yüz şekilleri (smile / sad) ---
+# --- Yuz sekilleri (gozler ortak; gulen / uzgun agiz) ---
 
-# 32x32 yuz: gozler 4x4 blok, agiz egrisi
-SMILE_EYES = tuple(
-    (x, y) for x in range(8, 12) for y in range(9, 13)
-) + tuple(
-    (x, y) for x in range(20, 24) for y in range(9, 13)
-)
+def _build_eyes() -> tuple[tuple[int, int], ...]:
+    """Iki yuvarlak goz (R=8 disk), centerlar (28, 36) ve (68, 36)."""
+    pts: set[tuple[int, int]] = set()
+    _stamp_disk(pts, 28, 36, 8)
+    _stamp_disk(pts, 68, 36, 8)
+    return tuple(sorted(pts))
 
-SMILE_MOUTH = (
-    # Iki dis kose (rows 18)
-    (7, 18), (8, 18), (23, 18), (24, 18),
-    # Egim (rows 19-20)
-    (8, 19), (9, 19), (10, 19), (21, 19), (22, 19), (23, 19),
-    (10, 20), (11, 20), (12, 20), (19, 20), (20, 20), (21, 20),
-    # Agiz tabani (rows 21-22)
-    (12, 21), (13, 21), (14, 21), (15, 21), (16, 21), (17, 21), (18, 21), (19, 21),
-    (13, 22), (14, 22), (15, 22), (16, 22), (17, 22), (18, 22),
-)
-SMILE_PIXELS = SMILE_EYES + SMILE_MOUTH
 
-# Uzgun yuz: ayni gozler, ters agiz (cember asagiya)
-SAD_MOUTH = (
-    # Agiz tepesi (rows 19-20)
-    (13, 19), (14, 19), (15, 19), (16, 19), (17, 19), (18, 19),
-    (12, 20), (13, 20), (14, 20), (15, 20), (16, 20), (17, 20), (18, 20), (19, 20),
-    # Egim asagidan yukariya (rows 21-22)
-    (10, 21), (11, 21), (12, 21), (19, 21), (20, 21), (21, 21),
-    (8, 22), (9, 22), (10, 22), (21, 22), (22, 22), (23, 22),
-    # Dis koseler (rows 23)
-    (7, 23), (8, 23), (23, 23), (24, 23),
-)
-SAD_PIXELS = SMILE_EYES + SAD_MOUTH
+def _build_smile_mouth() -> tuple[tuple[int, int], ...]:
+    """Yukari acik parabol — agiz koseleri yukari, ortasi asagi."""
+    pts: set[tuple[int, int]] = set()
+    for x in range(24, 73):
+        u = (x - 48) / 24.0
+        y_center = 62 + 14 * (1 - u * u)
+        if y_center < 0:
+            continue
+        for dy in range(-2, 3):
+            y = int(y_center + dy)
+            if 0 <= y < H:
+                pts.add((x, y))
+    return tuple(sorted(pts))
+
+
+def _build_sad_mouth() -> tuple[tuple[int, int], ...]:
+    """Asagi acik parabol — koseler asagi, ortasi yukari (uzgun)."""
+    pts: set[tuple[int, int]] = set()
+    for x in range(24, 73):
+        u = (x - 48) / 24.0
+        y_center = 76 - 14 * (1 - u * u)
+        for dy in range(-2, 3):
+            y = int(y_center + dy)
+            if 0 <= y < H:
+                pts.add((x, y))
+    return tuple(sorted(pts))
+
+
+SMILE_EYES = _build_eyes()
+SMILE_MOUTH = _build_smile_mouth()
+SAD_MOUTH = _build_sad_mouth()
+SMILE_PIXELS = tuple(sorted(set(SMILE_EYES) | set(SMILE_MOUTH)))
+SAD_PIXELS = tuple(sorted(set(SMILE_EYES) | set(SAD_MOUTH)))
 
 
 def pat_smile_face(buf, t, r, g, b, r2, g2, b2, intensity, speed_mult):
-    """Gülen yüz — yumuşak nefes pulsu."""
+    """Gulen yuz - yumusak nefes pulsu."""
     buf.clear()
     pulse = (math.sin(2 * math.pi * t * 0.4 * speed_mult) + 1) * 0.5
     k = intensity * (0.60 + 0.35 * pulse)
@@ -575,7 +635,7 @@ def pat_smile_face(buf, t, r, g, b, r2, g2, b2, intensity, speed_mult):
 
 
 def pat_sad_face(buf, t, r, g, b, r2, g2, b2, intensity, speed_mult):
-    """Üzgün yüz — yavaş, ağır pulse."""
+    """Uzgun yuz - yavas, agir pulse."""
     buf.clear()
     pulse = (math.sin(2 * math.pi * t * 0.25 * speed_mult) + 1) * 0.5
     k = intensity * (0.50 + 0.30 * pulse)
@@ -584,64 +644,57 @@ def pat_sad_face(buf, t, r, g, b, r2, g2, b2, intensity, speed_mult):
         buf.set(x, y, c)
 
 
-# --- Damla (gözyaşı) ---
+# --- Damla (gozyasi) ---
 
 def pat_tear_drop(buf, t, r, g, b, r2, g2, b2, intensity, speed_mult):
-    """Yavaşça düşen tek bir gözyaşı (32x32 olceginde buyuk damla)."""
+    """Yavasca dusen gozyasi - 96x96 iri damla + iz."""
     buf.clear()
     cycle = (t * 0.25 * speed_mult) % 1.0
-    head_y = int(cycle * 36) - 4  # y=-4..32 arasi
-    cx = 15  # merkez kolon
+    head_y = int(cycle * 116) - 16  # ust merkez y
+    cx = 48
     c_main = _scale(r, g, b, intensity)
     c_dim = _scale(r, g, b, intensity * 0.55)
     c_trail = _scale(r, g, b, intensity * 0.25)
-    # Iz (yukaridan asagiya hafif gradyan)
-    for off in range(-4, -1):
+    # Iz - 12 piksel yukariya solan iz (3 piksel genis)
+    for off in range(-14, -4):
         py = head_y + off
         if 0 <= py < H:
-            buf.set(cx, py, c_trail)
-    # Ust sivri
-    if 0 <= head_y - 1 < H:
-        buf.set(cx, head_y - 1, c_dim)
-    # Govde - 3 piksel genis 2 piksel uzun
-    if 0 <= head_y < H:
-        buf.set(cx - 1, head_y, c_main)
-        buf.set(cx, head_y, c_main)
-        buf.set(cx + 1, head_y, c_main)
-    if 0 <= head_y + 1 < H:
-        buf.set(cx - 1, head_y + 1, c_main)
-        buf.set(cx, head_y + 1, c_main)
-        buf.set(cx + 1, head_y + 1, c_main)
-    # Alt yuvarlama
-    if 0 <= head_y + 2 < H:
-        buf.set(cx, head_y + 2, c_dim)
+            k = intensity * (0.10 + 0.15 * (off + 14) / 10)
+            c = _scale(r, g, b, k)
+            for dx in (-1, 0, 1):
+                buf.set(cx + dx, py, c)
+    # Sivri tepe (rows -4 to -2)
+    for off, half in [(-4, 0), (-3, 1), (-2, 1)]:
+        py = head_y + off
+        if 0 <= py < H:
+            for dx in range(-half, half + 1):
+                buf.set(cx + dx, py, c_dim)
+    # Genis govde (rows -1 to +4) — 7-9 piksel genis
+    body_widths = [3, 4, 4, 4, 3, 3]
+    for i, half in enumerate(body_widths):
+        py = head_y - 1 + i
+        if 0 <= py < H:
+            for dx in range(-half, half + 1):
+                buf.set(cx + dx, py, c_main)
+    # Yuvarlak alt (rows +5 to +7)
+    for off, half in [(5, 3), (6, 2), (7, 1)]:
+        py = head_y + off
+        if 0 <= py < H:
+            for dx in range(-half, half + 1):
+                buf.set(cx + dx, py, c_dim)
 
 
-# --- Ateş (alev) ---
+# --- Ates (alev) ---
 
 def _build_fire_base() -> tuple[tuple[int, int], ...]:
-    """32x32 olceginde alev tabani - asagidan yukariya daralan ucgen."""
+    """96x96 alev tabani - asagidan yukariya daralan ucgen."""
     pts: set[tuple[int, int]] = set()
-    # Genislik tabandan tepeye azaliyor
-    widths = [
-        (8, 23, 31),    # row 31: cols 8-23
-        (8, 23, 30),
-        (9, 22, 29),
-        (9, 22, 28),
-        (10, 21, 27),
-        (10, 21, 26),
-        (11, 20, 25),
-        (12, 19, 24),
-        (12, 19, 23),
-        (13, 18, 22),
-        (13, 18, 21),
-        (14, 17, 20),
-        (14, 17, 19),
-        (15, 16, 18),
-    ]
-    for left, right, y in widths:
-        for x in range(left, right + 1):
-            pts.add((x, y))
+    # Genislik: y=95 -> 49 piksel genis; y=32 -> 1 piksel
+    for y in range(32, 96):
+        half_w = int((y - 32) / 63.0 * 25)
+        for x in range(48 - half_w, 48 + half_w + 1):
+            if 0 <= x < W:
+                pts.add((x, y))
     return tuple(sorted(pts))
 
 
@@ -649,7 +702,7 @@ FIRE_BASE = _build_fire_base()
 
 
 def pat_fire(buf, t, r, g, b, r2, g2, b2, intensity, speed_mult):
-    """Alev — taban sabit, ustler kipirdar (32x32 buyuk alev)."""
+    """Alev - taban sabit, ustler kipirdar."""
     buf.clear()
     flicker = (math.sin(2 * math.pi * t * 4.0 * speed_mult) + 1) * 0.5
     base_k = intensity * (0.65 + 0.30 * flicker)
@@ -657,40 +710,48 @@ def pat_fire(buf, t, r, g, b, r2, g2, b2, intensity, speed_mult):
     for (x, y) in FIRE_BASE:
         buf.set(x, y, c_base)
     has_second = (r2 + g2 + b2) > 0
-    n_tips = int(10 + 18 * speed_mult)
+    n_tips = int(60 + 110 * speed_mult)
     for _ in range(n_tips):
         if random.randint(0, 99) >= 60:
             continue
-        x = 10 + random.randint(0, 11)
-        y = 10 + random.randint(0, 12)
+        x = 26 + random.randint(0, 44)
+        y = 28 + random.randint(0, 50)
         use_second = has_second and random.randint(0, 1) == 0
         cr, cg, cb = (r2, g2, b2) if use_second else (r, g, b)
         k = intensity * (0.45 + random.random() * 0.45)
-        buf.set(x, y, _scale(cr, cg, cb, k))
+        c = _scale(cr, cg, cb, k)
+        # 2x2 alev parcaciklari
+        for dx in (0, 1):
+            for dy in (0, 1):
+                buf.set(x + dx, y + dy, c)
 
 
-# --- Şimşek ---
+# --- Simsek ---
 
 def _build_lightning() -> tuple[tuple[int, int], ...]:
-    """32x32 olceginde kalin zigzag simsek — sag-ust koseden sol-alta."""
+    """96x96 kalin zigzag simsek — sag-ust koseden sol-alta."""
     pts: set[tuple[int, int]] = set()
-    # Ust kisim: (20,2) -> (12,12), kalinlik 3
-    for i in range(0, 11):
-        x = 20 - i + i // 2
-        y = 2 + i
-        for dx in (-1, 0, 1):
-            pts.add((x + dx, y))
-    # Genisleme noktasi (rows 11-13)
-    for x in range(8, 24):
-        pts.add((x, 12))
-    for x in range(10, 22):
-        pts.add((x, 13))
-    # Alt kisim: (12,13) -> (4,28), kalinlik 3
-    for i in range(0, 16):
-        x = 12 - i // 2
-        y = 14 + i
-        for dx in (-1, 0, 1):
-            pts.add((x + dx, y))
+    # Ust kisim: (60, 6) -> (36, 36), kalin 5
+    for i in range(0, 31):
+        x = 60 - i + i // 2
+        y = 6 + i
+        for dx in range(-2, 3):
+            for dy in (-1, 0, 1):
+                pts.add((x + dx, y + dy))
+    # Genisleme noktasi (rows 33-40)
+    for x in range(24, 72):
+        for y in (33, 34, 35, 36):
+            pts.add((x, y))
+    for x in range(30, 66):
+        for y in (37, 38, 39, 40):
+            pts.add((x, y))
+    # Alt kisim: (36, 40) -> (12, 84), kalin 5
+    for i in range(0, 45):
+        x = 36 - i // 2
+        y = 40 + i
+        for dx in range(-2, 3):
+            for dy in (-1, 0, 1):
+                pts.add((x + dx, y + dy))
     return tuple(sorted(pts))
 
 
@@ -698,7 +759,7 @@ LIGHTNING_PIXELS = _build_lightning()
 
 
 def pat_lightning(buf, t, r, g, b, r2, g2, b2, intensity, speed_mult):
-    """Şimşek — ani parlak çakma, ardından karanlık."""
+    """Simsek — ani parlak cakma, ardindan karanlik."""
     buf.clear()
     cycle = (t * 0.9 * speed_mult) % 1.0
     if cycle < 0.05:
@@ -712,49 +773,37 @@ def pat_lightning(buf, t, r, g, b, r2, g2, b2, intensity, speed_mult):
         buf.set(x, y, c)
 
 
-# --- Oklar (yukarı / aşağı) ---
+# --- Oklar ---
 
 def _build_arrow_up() -> tuple[tuple[int, int], ...]:
-    """32x32 olceginde yukari ok: ucgen ust + genis govde."""
+    """96x96 yukari ok: ucgen ust + genis govde."""
     pts: set[tuple[int, int]] = set()
-    # Ucgen ust (rows 4-9, genisleyerek)
-    triangle = [
-        (15, 16, 4),
-        (14, 17, 5),
-        (13, 18, 6),
-        (12, 19, 7),
-        (11, 20, 8),
-        (10, 21, 9),
-    ]
-    for left, right, y in triangle:
-        for x in range(left, right + 1):
-            pts.add((x, y))
-    # Govde 4 piksel genis (cols 14-17, rows 10-27)
-    for y in range(10, 28):
-        for x in range(14, 18):
+    # Ucgen ust: y=12 (uc) → y=30 (taban genis)
+    for y in range(12, 31):
+        half_w = (y - 12)
+        for x in range(48 - half_w, 48 + half_w + 1):
+            if 0 <= x < W:
+                pts.add((x, y))
+    # Govde: cols 40-55 (16 genis), rows 30-83
+    for y in range(30, 84):
+        for x in range(40, 56):
             pts.add((x, y))
     return tuple(sorted(pts))
 
 
 def _build_arrow_down() -> tuple[tuple[int, int], ...]:
-    """32x32 olceginde asagi ok: govde + ucgen alt."""
+    """96x96 asagi ok: govde + ucgen alt."""
     pts: set[tuple[int, int]] = set()
-    # Govde 4 piksel genis (cols 14-17, rows 4-21)
-    for y in range(4, 22):
-        for x in range(14, 18):
+    # Govde: cols 40-55, rows 12-65
+    for y in range(12, 66):
+        for x in range(40, 56):
             pts.add((x, y))
-    # Ucgen alt (rows 22-27, genisleyip daralarak)
-    triangle = [
-        (10, 21, 22),
-        (11, 20, 23),
-        (12, 19, 24),
-        (13, 18, 25),
-        (14, 17, 26),
-        (15, 16, 27),
-    ]
-    for left, right, y in triangle:
-        for x in range(left, right + 1):
-            pts.add((x, y))
+    # Ucgen alt: y=66 (taban) → y=83 (uc)
+    for y in range(66, 84):
+        half_w = (83 - y)
+        for x in range(48 - half_w, 48 + half_w + 1):
+            if 0 <= x < W:
+                pts.add((x, y))
     return tuple(sorted(pts))
 
 
@@ -769,7 +818,7 @@ def pat_arrow_up(buf, t, r, g, b, r2, g2, b2, intensity, speed_mult):
     k_top = intensity * (0.70 + 0.30 * pulse)
     k_bottom = intensity * (0.40 + 0.20 * pulse)
     for (x, y) in ARROW_UP_PIXELS:
-        ratio = 1 - (y - 4) / 24
+        ratio = 1 - (y - 12) / 72
         k = k_bottom + (k_top - k_bottom) * ratio
         buf.set(x, y, _scale(r, g, b, k))
 
@@ -781,97 +830,192 @@ def pat_arrow_down(buf, t, r, g, b, r2, g2, b2, intensity, speed_mult):
     k_top = intensity * (0.30 + 0.15 * pulse)
     k_bottom = intensity * (0.65 + 0.30 * pulse)
     for (x, y) in ARROW_DOWN_PIXELS:
-        ratio = (y - 4) / 24
+        ratio = (y - 12) / 72
         k = k_top + (k_bottom - k_top) * ratio
         buf.set(x, y, _scale(r, g, b, k))
 
 
-# --- Yalnız tek nokta ---
+# --- Yalniz tek nokta ---
 
 def pat_lonely_dot(buf, t, r, g, b, r2, g2, b2, intensity, speed_mult):
-    """Tek bir kucuk nokta merkezde, cok yavas nefes alir (32x32 buyuk nokta)."""
+    """Tek nokta merkezde, cok yavas nefes alir (96x96 iri disk)."""
     buf.clear()
     pulse = (math.sin(2 * math.pi * t * 0.20 * speed_mult) + 1) * 0.5
     k = intensity * (0.40 + 0.45 * pulse)
     c = _scale(r, g, b, k)
-    # 4x4 merkez nokta
-    for dx in range(-2, 2):
-        for dy in range(-2, 2):
-            buf.set(15 + dx + 1, 15 + dy + 1, c)
+    # 13x13 disk
+    radius = 6
+    for dy in range(-radius, radius + 1):
+        for dx in range(-radius, radius + 1):
+            if dx * dx + dy * dy <= radius * radius:
+                buf.set(48 + dx, 48 + dy, c)
 
 
-# --- Zıplayan toplar ---
+# --- Ziplayan toplar ---
 
 def pat_bouncing(buf, t, r, g, b, r2, g2, b2, intensity, speed_mult):
-    """4 top farkli tempolarda ziplar — 32x32 olceginde 3x3 toplar."""
+    """4 top farkli tempolarda ziplar — 96x96 iri toplar."""
     buf.clear()
     has_second = (r2 + g2 + b2) > 0
-    balls = [(5, 0.0), (12, 0.25), (20, 0.50), (27, 0.75)]
+    balls = [(15, 0.0), (36, 0.25), (60, 0.50), (81, 0.75)]
     for cx, phase in balls:
         cycle = (t * 0.7 * speed_mult + phase) % 1.0
         bounce = abs(math.sin(math.pi * cycle))
-        cy = 28 - int(bounce * 24)
+        cy = 84 - int(bounce * 72)
         if not (0 <= cy < H):
             continue
         use_second = has_second and (int(t * 2 * speed_mult + phase * 3) % 2 == 0)
         cr, cg, cb = (r2, g2, b2) if use_second else (r, g, b)
         c = _scale(cr, cg, cb, intensity)
-        # 3x3 top
-        for dx in range(-1, 2):
-            for dy in range(-1, 2):
-                if dx * dx + dy * dy <= 2:
+        # 9x9 top (radius 4)
+        for dy in range(-4, 5):
+            for dx in range(-4, 5):
+                if dx * dx + dy * dy <= 16:
                     buf.set(cx + dx, cy + dy, c)
 
 
 # --- Saat ---
 
 def pat_clock(buf, t, r, g, b, r2, g2, b2, intensity, speed_mult):
-    """Donen saat ibresi — bekleme hissi (32x32 buyuk saat)."""
+    """Donen saat ibresi — bekleme hissi (96x96 buyuk saat)."""
     buf.clear()
     cx, cy = CX, CY
-    radius_marks = 13.5
-    # 12 saat isareti — 2x2 sonuk blok
+    radius_marks = 41.0
+    # 12 saat isareti — 4x4 sonuk blok
     c_marks = _scale(r, g, b, intensity * 0.35)
     for h in range(12):
         angle = 2 * math.pi * h / 12 - math.pi / 2
         mx = cx + radius_marks * math.cos(angle)
         my = cy + radius_marks * math.sin(angle)
-        for dx in (0, 1):
-            for dy in (0, 1):
-                buf.set(int(mx + dx), int(my + dy), c_marks)
-    # Ibre — 12 piksel uzunlukta, 2 piksel kalin
+        for dx in range(-2, 2):
+            for dy in range(-2, 2):
+                buf.set(int(mx + dx + 0.5), int(my + dy + 0.5), c_marks)
+    # Ibre — 36 piksel uzunluk, 5 piksel kalin
     hand_angle = 2 * math.pi * (t * 0.25 * speed_mult) - math.pi / 2
     c_hand = _scale(r, g, b, intensity)
-    cosA = math.cos(hand_angle)
-    sinA = math.sin(hand_angle)
-    for r_step in range(1, 12):
-        for thick in (-1, 0, 1):
-            # ibreyi cogalt - dik yonde 1 piksel kalinlastir
-            px = cx + r_step * cosA - thick * sinA
-            py = cy + r_step * sinA + thick * cosA
+    cos_a = math.cos(hand_angle)
+    sin_a = math.sin(hand_angle)
+    for r_step in range(1, 36):
+        for thick in (-2, -1, 0, 1, 2):
+            px = cx + r_step * cos_a - thick * sin_a
+            py = cy + r_step * sin_a + thick * cos_a
             buf.set(int(px), int(py), c_hand)
-    # Merkez 4x4
-    for dx in range(-2, 2):
-        for dy in range(-2, 2):
-            buf.set(15 + dx + 1, 15 + dy + 1, c_hand)
+    # Merkez 6x6 disk
+    for dy in range(-3, 4):
+        for dx in range(-3, 4):
+            if dx * dx + dy * dy <= 9:
+                buf.set(int(cx + dx + 0.5), int(cy + dy + 0.5), c_hand)
 
 
-# --- Kaotik flaş ---
+# --- Sallanan el (selamlama) ---
+
+def _build_hand() -> tuple[tuple[int, int], ...]:
+    """96x96 el silueti — 4 parmak yukari, basparmak saga, palme + bilek."""
+    pts: set[tuple[int, int]] = set()
+    # 4 parmak: (x0, x1, y0, y1) — 8 piksel kalin
+    finger_specs = [
+        (22, 29, 28, 46),   # kucuk parmak
+        (31, 38, 18, 46),   # yuzuk
+        (40, 47, 12, 46),   # orta (en uzun)
+        (49, 56, 22, 46),   # isaret
+    ]
+    for x0, x1, y0, y1 in finger_specs:
+        for y in range(y0, y1 + 1):
+            for x in range(x0, x1 + 1):
+                pts.add((x, y))
+    # Palme - parmak diplerinden bilege
+    for y in range(46, 68):
+        for x in range(22, 60):
+            pts.add((x, y))
+    # Basparmak - palmenin sag kenarindan disariya cikan dolu oval
+    # Y merkez 55, x merkez 60-72, ovaldir (genis ortada, daralan uclarda)
+    for y_off in range(-7, 8):
+        y = 55 + y_off
+        if not (0 <= y < H):
+            continue
+        # Genislik: ortada en fazla 14, uclara dogru azalir
+        if abs(y_off) <= 3:
+            width = 14
+        elif abs(y_off) <= 5:
+            width = 14 - (abs(y_off) - 3) * 2
+        else:
+            width = 10 - (abs(y_off) - 5) * 3
+        if width >= 0:
+            for x in range(58, 58 + width):
+                if 0 <= x < W:
+                    pts.add((x, y))
+    # Bilek - dar (cols 28-52, rows 68-86)
+    for y in range(68, 86):
+        for x in range(28, 53):
+            pts.add((x, y))
+    return tuple(sorted(pts))
+
+
+HAND_PIXELS = _build_hand()
+HAND_SET = frozenset(HAND_PIXELS)
+
+
+def pat_wave_hand(buf, t, r, g, b, r2, g2, b2, intensity, speed_mult):
+    """Selamlayan el - bilek pivotunda saga sola sallanir + arka hareket cizgileri."""
+    buf.clear()
+    phase = 2 * math.pi * t * 1.1 * speed_mult
+    swing = math.sin(phase)
+    angle = swing * (22.0 * math.pi / 180.0)
+    cos_a = math.cos(angle)
+    sin_a = math.sin(angle)
+    px, py = 40.0, 80.0  # bilek pivot
+
+    c = _scale(r, g, b, intensity)
+    # Ters eslestirme: her hedef pikseli kaynak HAND_SET'e geri proje et
+    for dy in range(H):
+        for dx in range(W):
+            ox = dx - px
+            oy = dy - py
+            sx = ox * cos_a + oy * sin_a + px
+            sy = -ox * sin_a + oy * cos_a + py
+            ix, iy = int(sx + 0.5), int(sy + 0.5)
+            if (ix, iy) in HAND_SET:
+                buf.set(dx, dy, c)
+
+    # Hareket cizgileri (ikincil renk varsa)
+    has_second = (r2 + g2 + b2) > 0
+    if has_second and abs(swing) > 0.45:
+        ck = intensity * (abs(swing) - 0.45) / 0.55
+        c2 = _scale(r2, g2, b2, ck)
+        if swing > 0:
+            arcs = [(12, 18), (9, 21), (6, 24),
+                    (15, 30), (12, 33), (9, 36),
+                    (18, 42), (15, 45)]
+        else:
+            arcs = [(81, 18), (84, 21), (87, 24),
+                    (78, 30), (81, 33), (84, 36),
+                    (75, 42), (78, 45)]
+        for (ax, ay) in arcs:
+            for dx in (-1, 0, 1):
+                for dy in (-1, 0, 1):
+                    buf.set(ax + dx, ay + dy, c2)
+
+
+# --- Kaotik flas ---
 
 def pat_chaotic_flash(buf, t, r, g, b, r2, g2, b2, intensity, speed_mult):
-    """Panik icin kaotik rastgele flaslar (32x32 yogun)."""
+    """Panik icin kaotik rastgele flaslar."""
     buf.fade_all(170)
     has_second = (r2 + g2 + b2) > 0
-    n = int(25 + 40 * speed_mult)
+    n = int(120 + 240 * speed_mult)
     for _ in range(n):
         if random.randint(0, 99) >= 65:
             continue
-        x = random.randint(0, W - 1)
-        y = random.randint(0, H - 1)
+        x = random.randint(0, W - 2)
+        y = random.randint(0, H - 2)
         use_second = has_second and random.randint(0, 1) == 0
         cr, cg, cb = (r2, g2, b2) if use_second else (r, g, b)
         k = intensity * (0.7 + random.random() * 0.3)
-        buf.set(x, y, _scale(cr, cg, cb, k))
+        c = _scale(cr, cg, cb, k)
+        # 2x2 flash
+        for dx in (0, 1):
+            for dy in (0, 1):
+                buf.set(x + dx, y + dy, c)
 
 
 PATTERN_DISPATCH = {
@@ -913,14 +1057,49 @@ PATTERN_DISPATCH = {
     "bouncing": pat_bouncing,
     "clock": pat_clock,
     "chaotic_flash": pat_chaotic_flash,
+    "wave_hand": pat_wave_hand,
 }
+
+
+# ============== Emoji frame onbellegi ==============
+
+
+class EmojiCache:
+    """Jest_id basina assets/emojis/<jest_id>/frame_NN.png'leri lazy-load eder.
+    Her frame, Buffer.pixels formatiyla uyumlu list[(r,g,b)] olarak saklanir.
+
+    Bos liste = bu jest icin frame bulunamadi (cagiran soyut desene dusebilir).
+    Cache pozitif/negatif sonuclari tutar; ayni jest icin disk tekrar okunmaz.
+    """
+
+    def __init__(self, base_dir: Path) -> None:
+        self.base_dir = base_dir
+        self._cache: dict[str, list[list[tuple[int, int, int]]]] = {}
+
+    def get(self, jest_id: str) -> list[list[tuple[int, int, int]]]:
+        cached = self._cache.get(jest_id)
+        if cached is not None:
+            return cached
+        frames: list[list[tuple[int, int, int]]] = []
+        jest_dir = self.base_dir / jest_id
+        if jest_dir.is_dir():
+            for fp in sorted(jest_dir.glob("frame_*.png")):
+                try:
+                    img = Image.open(fp).convert("RGB")
+                    if img.size != (W, H):
+                        img = img.resize((W, H), Image.Resampling.LANCZOS)
+                    frames.append(list(img.getdata()))
+                except (OSError, ValueError):
+                    pass  # bozuk dosya - atla
+        self._cache[jest_id] = frames
+        return frames
 
 
 # ============== Engine ==============
 
 
 class GestureEngine:
-    """Aktif jest durumunu tutar, her frame için buffer'ı günceller."""
+    """Aktif jest durumunu tutar, her frame icin buffer'i gunceller."""
 
     def __init__(self, gestures_data: dict) -> None:
         self.gestures = {g["id"]: g for g in gestures_data["jestler"]}
@@ -930,6 +1109,7 @@ class GestureEngine:
         self.duration: float = 0.0
         self.intensity: float = 1.0
         self._t0 = time.monotonic()
+        self.emoji_cache = EmojiCache(_EMOJI_BASE_DIR)
 
     def trigger(self, jest_id: str, yogunluk: Optional[float] = None,
                 sure_sn: Optional[float] = None) -> bool:
@@ -963,9 +1143,27 @@ class GestureEngine:
 
     def _render_active(self, now: float) -> None:
         g = self.active
+        elapsed = now - self.start
+
+        # Emoji yolu: hazir frame'leri sirayla oynat
+        if g.get("gorsel_tipi") == "emoji":
+            frames = self.emoji_cache.get(g["id"])
+            if frames:
+                idx = int(elapsed * EMOJI_FPS) % len(frames)
+                src = frames[idx]
+                if self.intensity >= 0.99:
+                    self.buf.pixels[:] = src
+                else:
+                    k = self.intensity
+                    self.buf.pixels[:] = [
+                        (int(r * k), int(gv * k), int(bv * k)) for r, gv, bv in src
+                    ]
+                return
+            # Frame bulunamadi (404 olan jestler vs.) - soyut desene düş
+
+        # Soyut desen yolu
         anim = g["animasyon"]
         spd = SPEED_MULTS[SPEED_NAME_TO_ID[anim["hiz"]]]
-        elapsed = now - self.start
         r, gg, b = anim["ana_renk"]
         sec = anim.get("ikincil_renk")
         r2, g2, b2 = (sec[0], sec[1], sec[2]) if sec else (0, 0, 0)

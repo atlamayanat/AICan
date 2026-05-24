@@ -14,6 +14,7 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import scrolledtext, ttk
 
+from build_jest_rehberi import build_rehber, OUTPUT_PATH as REHBER_PATH
 from gesture_engine import GestureEngine
 from llm_bridge import LLMBridge
 from matrix_sim import MatrixView
@@ -50,6 +51,7 @@ class App:
 
         gestures_data = load_gestures(config)
         self.engine = GestureEngine(gestures_data)
+        self._refresh_jest_rehberi(gestures_data)
 
         # Oturum logger - her oturumun .txt dosyasina yazar
         log_path = (BASE_DIR / config.get("session_log_path", "../logs/session.log")).resolve()
@@ -59,6 +61,8 @@ class App:
 
         self.event_q: queue.Queue = queue.Queue()
         self._busy = False
+        self._pulling = False
+        self._local_model_names: list[str] = []
 
         self._build_ui()
         # Pencere kapanisi: oturum ozetini yaz, sonra cikis
@@ -67,13 +71,26 @@ class App:
         self.root.after(50, self._poll_events)
         self.root.after(FRAME_INTERVAL_MS, self._frame_tick)
         self.root.after(150, self._initial_check)
+        self.root.after(180, self._refresh_local_models)
         self.root.after(200, self._ram_tick)
+        # Sergi acilisinda ilk ziyaretci 17sn beklemesin: modeli RAM'e isit.
+        self.root.after(220, self._initial_warmup)
+
+    def _refresh_jest_rehberi(self, gestures_data: dict) -> None:
+        """JESTLER.md'yi gestures.json'dan yeniden uret.
+        Hata olursa app baslatmayi engelleme — sadece logla."""
+        try:
+            REHBER_PATH.write_text(build_rehber(gestures_data), encoding="utf-8")
+            log.info("Jest rehberi guncellendi: %s (%d jest)",
+                     REHBER_PATH, len(gestures_data["jestler"]))
+        except OSError as e:
+            log.warning("Jest rehberi yazilamadi: %s", e)
 
     # ---------- UI ----------
     def _build_ui(self) -> None:
         self.root.title("AI Body — Sergi Prototipi")
-        self.root.geometry("1600x940")
-        self.root.minsize(1320, 860)
+        self.root.geometry("1760x1000")
+        self.root.minsize(1440, 880)
 
         # Renk paleti — neon cyberpunk: koyu zemin + cyan/magenta/green vurgu
         self.COLOR_BG = "#08080f"            # cok koyu mavi-siyah
@@ -107,14 +124,44 @@ class App:
             style.theme_use("clam")
         except tk.TclError:
             pass
-        for name, accent, bg_btn, hover in [
-            ("Send.TButton", self.COLOR_NEON_CYAN, "#0a1a26", "#0f2a3a"),
-            ("Stop.TButton", self.COLOR_NEON_PINK, "#1a0a18", "#2a0f24"),
+        # Combobox stili — neon zemin, koyu arka plan
+        style.configure(
+            "Neon.TCombobox",
+            fieldbackground=self.COLOR_PANEL_ALT,
+            background=self.COLOR_PANEL,
+            foreground=self.COLOR_TEXT,
+            bordercolor=self.COLOR_NEON_CYAN,
+            arrowcolor=self.COLOR_NEON_CYAN,
+            lightcolor=self.COLOR_NEON_CYAN,
+            darkcolor=self.COLOR_NEON_CYAN,
+            selectbackground=self.COLOR_PANEL_ALT,
+            selectforeground=self.COLOR_NEON_CYAN,
+            padding=(8, 6),
+        )
+        style.map(
+            "Neon.TCombobox",
+            fieldbackground=[("readonly", self.COLOR_PANEL_ALT)],
+            foreground=[("readonly", self.COLOR_TEXT)],
+            bordercolor=[("focus", self.COLOR_NEON_CYAN), ("hover", self.COLOR_NEON_CYAN)],
+        )
+        # Acilir liste icindeki yazi/zemin (TCombobox'a ozel TLM stili degil — root option)
+        self.root.option_add("*TCombobox*Listbox.background", self.COLOR_PANEL_ALT)
+        self.root.option_add("*TCombobox*Listbox.foreground", self.COLOR_TEXT)
+        self.root.option_add("*TCombobox*Listbox.selectBackground", self.COLOR_NEON_CYAN)
+        self.root.option_add("*TCombobox*Listbox.selectForeground", self.COLOR_BG)
+        self.root.option_add("*TCombobox*Listbox.font", ("Consolas", 10))
+
+        for name, accent, bg_btn, hover, font, pad in [
+            ("Send.TButton", self.COLOR_NEON_CYAN, "#0a1a26", "#0f2a3a", ("Consolas", 12, "bold"), (20, 10)),
+            ("Stop.TButton", self.COLOR_NEON_PINK, "#1a0a18", "#2a0f24", ("Consolas", 12, "bold"), (20, 10)),
+            ("Mini.TButton", self.COLOR_NEON_CYAN, "#0a1a26", "#0f2a3a", ("Consolas", 9, "bold"), (8, 4)),
+            ("MiniPink.TButton", self.COLOR_NEON_PINK, "#1a0a18", "#2a0f24", ("Consolas", 9, "bold"), (8, 4)),
+            ("MiniPurple.TButton", self.COLOR_NEON_PURPLE, "#150a1f", "#22113a", ("Consolas", 9, "bold"), (8, 4)),
         ]:
             style.configure(
                 name,
-                font=("Consolas", 12, "bold"),
-                padding=(20, 10),
+                font=font,
+                padding=pad,
                 background=bg_btn,
                 foreground=accent,
                 borderwidth=1,
@@ -161,7 +208,7 @@ class App:
         body.grid(row=1, column=0, sticky="nsew", padx=24, pady=12)
         body.columnconfigure(0, weight=0, minsize=280)
         body.columnconfigure(1, weight=1)
-        body.columnconfigure(2, weight=0, minsize=340)
+        body.columnconfigure(2, weight=0, minsize=270)
         body.rowconfigure(0, weight=1)
 
         # ============ SOL KOLON ============
@@ -182,8 +229,88 @@ class App:
                 font=self.FONT_LABEL,
                 bg=self.COLOR_PANEL,
                 fg=self.COLOR_TEXT,
+                wraplength=240,
+                justify="left",
             ).pack(fill=tk.X, padx=16, pady=4)
         tk.Frame(status, bg=self.COLOR_PANEL, height=10).pack()
+
+        # // MODEL paneli — yuklu modeller arasi gecis + yeni model indirme
+        self.PRESET_PULL_MODELS = [
+            "qwen2.5:7b-instruct",
+            "qwen2.5:3b-instruct",
+            "qwen2.5:14b-instruct",
+            "gemma3:4b",
+            "gemma3:1b",
+            "llama3.2:3b",
+            "llama3.1:8b",
+            "mistral:7b-instruct",
+        ]
+
+        model_panel = self._make_panel(left_col, "// MODEL", self.COLOR_NEON_PINK)
+        model_panel.pack(fill=tk.X, pady=(14, 0))
+        m_inner = tk.Frame(model_panel, bg=self.COLOR_PANEL)
+        m_inner.pack(fill=tk.X, padx=16, pady=(0, 12))
+
+        # Aktif model rozeti
+        tk.Label(
+            m_inner, text="aktif", anchor="w",
+            font=("Consolas", 9), bg=self.COLOR_PANEL, fg=self.COLOR_TEXT_DIM,
+        ).pack(fill=tk.X)
+        self.var_active_model = tk.StringVar(value=self.config["ollama_model"])
+        tk.Label(
+            m_inner, textvariable=self.var_active_model, anchor="w",
+            font=self.FONT_LABEL_BOLD, bg=self.COLOR_PANEL,
+            fg=self.COLOR_NEON_GREEN, wraplength=240, justify="left",
+        ).pack(fill=tk.X, pady=(0, 8))
+
+        # Yuklu modeller bolumu
+        tk.Label(
+            m_inner, text="yuklu modeller", anchor="w",
+            font=("Consolas", 9), bg=self.COLOR_PANEL, fg=self.COLOR_TEXT_DIM,
+        ).pack(fill=tk.X)
+        self.cmb_local = ttk.Combobox(
+            m_inner, state="readonly", style="Neon.TCombobox",
+            font=("Consolas", 10),
+        )
+        self.cmb_local.pack(fill=tk.X, pady=(2, 4))
+
+        m_btnrow = tk.Frame(m_inner, bg=self.COLOR_PANEL)
+        m_btnrow.pack(fill=tk.X, pady=(0, 10))
+        self.btn_use_model = ttk.Button(
+            m_btnrow, text="AKTIF YAP", style="Mini.TButton",
+            command=self._on_use_model,
+        )
+        self.btn_use_model.pack(side=tk.LEFT)
+        self.btn_refresh_models = ttk.Button(
+            m_btnrow, text="YENILE", style="MiniPurple.TButton",
+            command=self._refresh_local_models,
+        )
+        self.btn_refresh_models.pack(side=tk.LEFT, padx=(6, 0))
+
+        # ince ayrac
+        tk.Frame(m_inner, bg=self.COLOR_BORDER, height=1).pack(fill=tk.X, pady=(2, 8))
+
+        # Yeni model indir bolumu
+        tk.Label(
+            m_inner, text="yeni model indir", anchor="w",
+            font=("Consolas", 9), bg=self.COLOR_PANEL, fg=self.COLOR_TEXT_DIM,
+        ).pack(fill=tk.X)
+        self.cmb_pull = ttk.Combobox(
+            m_inner, values=self.PRESET_PULL_MODELS, style="Neon.TCombobox",
+            font=("Consolas", 10),
+        )
+        self.cmb_pull.pack(fill=tk.X, pady=(2, 6))
+        self.btn_pull_model = ttk.Button(
+            m_inner, text="INDIR", style="MiniPink.TButton",
+            command=self._on_pull_model,
+        )
+        self.btn_pull_model.pack(fill=tk.X, pady=(0, 6))
+        self.var_pull_status = tk.StringVar(value="")
+        tk.Label(
+            m_inner, textvariable=self.var_pull_status, anchor="w",
+            font=("Consolas", 9), bg=self.COLOR_PANEL,
+            fg=self.COLOR_NEON_PINK, wraplength=240, justify="left",
+        ).pack(fill=tk.X)
 
         last = self._make_panel(left_col, "// SON KOMUT", self.COLOR_NEON_PURPLE)
         last.pack(fill=tk.X, pady=(14, 0))
@@ -198,6 +325,8 @@ class App:
                 font=self.FONT_LABEL,
                 bg=self.COLOR_PANEL,
                 fg=self.COLOR_TEXT,
+                wraplength=240,
+                justify="left",
             ).pack(fill=tk.X, padx=16, pady=4)
         tk.Frame(last, bg=self.COLOR_PANEL, height=10).pack()
 
@@ -217,6 +346,8 @@ class App:
                 font=self.FONT_MONO,
                 bg=self.COLOR_PANEL,
                 fg=self.COLOR_NEON_GREEN,
+                wraplength=240,
+                justify="left",
             ).pack(fill=tk.X, padx=16, pady=3)
         tk.Frame(stats_frame, bg=self.COLOR_PANEL, height=10).pack()
 
@@ -233,7 +364,7 @@ class App:
         # ust etiket
         tk.Label(
             center_col,
-            text="// TEPKİ EKRANI · 32×32",
+            text="// TEPKİ EKRANI · 96×96",
             font=self.FONT_PANEL_TITLE,
             bg=self.COLOR_BG,
             fg=self.COLOR_NEON_CYAN,
@@ -249,9 +380,9 @@ class App:
             highlightthickness=2,
         )
         matrix_frame.pack()
-        # cell_size=17 → 17*32 + 33 = 577 px (kare). pencere yuksekligine sigar.
+        # cell_size=7, padding=1 → 7*96 + 97 = 769 px (kare). 96×96 LED matrisi.
         # Matris LED renkleri gesture_engine'den geliyor; UI temasi onlari etkilemez.
-        self.matrix = MatrixView(matrix_frame, cell_size=17, padding=1)
+        self.matrix = MatrixView(matrix_frame, cell_size=7, padding=1)
         self.matrix.pack()
 
         # ============ INPUT BAR — orta kolonda yanit ustunde ============
@@ -318,15 +449,17 @@ class App:
         log_frame.pack(fill=tk.BOTH, expand=True)
         self.log_box = scrolledtext.ScrolledText(
             log_frame,
-            height=18,
-            font=("Consolas", 10),
+            height=14,
+            width=28,
+            wrap=tk.WORD,
+            font=("Consolas", 9),
             bg=self.COLOR_PANEL_ALT,
             fg=self.COLOR_NEON_GREEN,
             insertbackground=self.COLOR_NEON_GREEN,
             relief=tk.FLAT,
             bd=0,
-            padx=12,
-            pady=10,
+            padx=10,
+            pady=8,
         )
         self.log_box.pack(fill=tk.BOTH, expand=True, padx=8, pady=(0, 8))
         self.log_box.configure(state=tk.DISABLED)
@@ -370,6 +503,17 @@ class App:
         ok_ollama = self.llm.is_alive()
         self.event_q.put({"type": "health", "ollama": ok_ollama})
 
+    def _initial_warmup(self) -> None:
+        """Model RAM'e isinmis olsun ki ilk ziyaretci 17sn beklemesin."""
+        if not self.config.get("warmup_on_start", True):
+            return
+        self.var_active.set("Aktif jest: model ısıtılıyor…")
+        threading.Thread(target=self._do_warmup, daemon=True).start()
+
+    def _do_warmup(self) -> None:
+        ok = self.llm.warmup()
+        self.event_q.put({"type": "warmup_done", "ok": ok})
+
     def _on_send(self) -> None:
         if self._busy:
             return
@@ -390,6 +534,74 @@ class App:
                               "detail": result or {"error": "no_response"}})
             return
         self.event_q.put({"type": "gesture", "user_text": text, "result": result})
+
+    # ---------- Model yonetimi ----------
+    def _refresh_local_models(self) -> None:
+        """Ollama'dan lokal model listesini cek (arkadan)."""
+        threading.Thread(target=self._do_refresh_local, daemon=True).start()
+
+    def _do_refresh_local(self) -> None:
+        models = self.llm.list_local_models()
+        self.event_q.put({"type": "local_models", "models": models})
+
+    def _on_use_model(self) -> None:
+        """Kullanici lokal listeden secim yapip AKTIF YAP'a basti."""
+        if self._busy:
+            self.var_pull_status.set("⚠ once cevap bekleniyor")
+            return
+        if self._pulling:
+            self.var_pull_status.set("⚠ indirme suruyor")
+            return
+        idx = self.cmb_local.current()
+        if idx < 0 or idx >= len(self._local_model_names):
+            self.var_pull_status.set("⚠ once bir model sec")
+            return
+        new_model = self._local_model_names[idx]
+        if new_model == self.llm.model:
+            self.var_pull_status.set("zaten aktif")
+            return
+        old = self.llm.model
+        self.llm.set_model(new_model)
+        self.var_active_model.set(new_model)
+        self.logger.model_name = new_model
+        self._save_config_model(new_model)
+        self.var_pull_status.set(f"✓ aktif: {new_model}")
+        self._append_log(f"[model] {old} → {new_model}")
+        self.logger.log_event(f"Aktif model degisti: {old} → {new_model}")
+        # Ollama durumunu yeniden test et — gecerli model varsa /api/chat sorunsuz
+        threading.Thread(target=self._do_health, daemon=True).start()
+
+    def _on_pull_model(self) -> None:
+        """Kullanici INDIR'e basti — secili veya yazilan model adini cek."""
+        if self._pulling:
+            return
+        name = self.cmb_pull.get().strip()
+        if not name:
+            self.var_pull_status.set("⚠ model adi bos")
+            return
+        self._pulling = True
+        self.btn_pull_model.configure(state=tk.DISABLED)
+        self.var_pull_status.set(f"⇣ {name} baslatiliyor...")
+        self._append_log(f"[pull] {name} indiriliyor...")
+        self.logger.log_event(f"Model indirme baslatildi: {name}")
+        threading.Thread(target=self._do_pull, args=(name,), daemon=True).start()
+
+    def _do_pull(self, name: str) -> None:
+        def on_progress(data: dict) -> None:
+            self.event_q.put({"type": "pull_progress", "name": name, "data": data})
+        ok = self.llm.pull_model(name, on_progress)
+        self.event_q.put({"type": "pull_done", "name": name, "ok": ok})
+
+    def _save_config_model(self, model_name: str) -> None:
+        """config.json'daki ollama_model alanini guncelle (sonraki acilis icin)."""
+        try:
+            self.config["ollama_model"] = model_name
+            CONFIG_PATH.write_text(
+                json.dumps(self.config, indent=2, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+        except OSError as e:
+            log.warning("config.json yazilamadi: %s", e)
 
     def _on_stop(self) -> None:
         """Kullanici Durdur'a basti — aktif jest durur, idle'a doner."""
@@ -420,22 +632,88 @@ class App:
                 self.btn_stop.configure(state=tk.DISABLED)
         self.root.after(FRAME_INTERVAL_MS, self._frame_tick)
 
+    def _humanize_error(self, err: str, detail: dict) -> str:
+        """Sergideki gorevli hatayi anlasin diye Ollama hatalarini Turkceye cevir."""
+        e = (err or "").lower()
+        if err == "unknown_jest_id":
+            return f"Geçersiz jest: {detail.get('jest_id')!r}"
+        if "read timed out" in e or "readtimeout" in e or "timed out" in e:
+            return "Model yanıt veremedi — bilgisayar yavaşlamış olabilir"
+        if "connection refused" in e or "max retries" in e or "failed to establish" in e:
+            return "Ollama servisi çalışmıyor — Ollama'yı yeniden başlat"
+        if "404" in e or ("model" in e and ("not found" in e or "bulunam" in e)):
+            return "Model bulunamadı — Ollama'da model eksik olabilir"
+        if "500" in e:
+            return "Model anlık yoğunluk, 5 sn sonra tekrar deneyin"
+        if "empty_content" in e:
+            return "Model boş cevap verdi — tekrar deneyin"
+        if "invalid_json" in e:
+            return "Model bozuk JSON döndürdü — tekrar deneyin"
+        if e.startswith("ollama_"):
+            return "Ollama bağlanamadı"
+        return f"Hata: {err[:80]}"
+
     def _handle_event(self, evt: dict) -> None:
         kind = evt.get("type")
         if kind == "health":
             ollama_ok = evt["ollama"]
             self.var_ollama.set("Ollama: ✓" if ollama_ok else "Ollama: ✗ (bağlanamadı)")
             self._append_log(f"[health] Ollama={'OK' if ollama_ok else 'YOK'}")
+        elif kind == "local_models":
+            models = evt["models"]
+            self._local_model_names = [m["name"] for m in models]
+            items = [f"{m['name']}  ({m['size_gb']:.1f} GB)" for m in models]
+            self.cmb_local["values"] = items
+            # Aktif modeli secili goster
+            if self.llm.model in self._local_model_names:
+                idx = self._local_model_names.index(self.llm.model)
+                self.cmb_local.current(idx)
+            elif items:
+                self.cmb_local.set("")
+            if not items:
+                self.var_pull_status.set("hic model yok — once indir")
+        elif kind == "pull_progress":
+            data = evt["data"]
+            name = evt["name"]
+            if data.get("error"):
+                self.var_pull_status.set(f"⚠ {data['error'][:60]}")
+            else:
+                status = data.get("status", "...")
+                completed = data.get("completed", 0) or 0
+                total = data.get("total", 0) or 0
+                if total > 0:
+                    pct = 100.0 * completed / total
+                    mb_done = completed / (1024 * 1024)
+                    mb_total = total / (1024 * 1024)
+                    self.var_pull_status.set(
+                        f"⇣ {name}\n{status} %{pct:.0f} ({mb_done:.0f}/{mb_total:.0f} MB)"
+                    )
+                else:
+                    self.var_pull_status.set(f"⇣ {name}\n{status}")
+        elif kind == "pull_done":
+            self._pulling = False
+            self.btn_pull_model.configure(state=tk.NORMAL)
+            name = evt["name"]
+            if evt["ok"]:
+                self.var_pull_status.set(f"✓ {name} indirildi")
+                self._append_log(f"[pull] {name} basarili")
+                self.logger.log_event(f"Model indirildi: {name}")
+                self._refresh_local_models()
+            else:
+                self._append_log(f"[pull] {name} hata")
+                self.logger.log_event(f"Model indirme HATASI: {name}")
+        elif kind == "warmup_done":
+            if evt["ok"]:
+                self._append_log("[warmup] model RAM'de hazır")
+                self.logger.log_event("Model warmup tamamlandi (RAM'e yuklendi)")
+            else:
+                self._append_log("[warmup] başarısız — ilk istek yavaş olabilir")
+            self.var_active.set("Aktif jest: idle")
         elif kind == "error":
             detail = evt["detail"]
             user_text = evt.get("user_text", "")
             err = detail.get("error", "bilinmeyen hata")
-            if err == "unknown_jest_id":
-                msg = f"Geçersiz jest: {detail.get('jest_id')!r}"
-            elif err.startswith("ollama_"):
-                msg = "Ollama bağlanamadı"
-            else:
-                msg = f"Hata: {err}"
+            msg = self._humanize_error(err, detail)
             self.var_active.set("Aktif jest: idle")
             self.var_yanit.set(f"⚠ {msg}")
             meta = detail.get("meta")

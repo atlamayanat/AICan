@@ -34,3 +34,7 @@ sistempromptyedek.txt
 # OS
 .DS_Store
 Thumbs.db
+
+# Emoji onizleme/debug dosyalari (runtime'da kullanilmiyor, prepare_emojis.py uretir)
+assets/emojis/**/preview.gif
+assets/emojis/**/preview_zoom.gif

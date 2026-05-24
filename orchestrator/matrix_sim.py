@@ -1,13 +1,13 @@
-"""Tkinter Canvas üstünde 16×16 LED matrisi görüntüleyicisi.
+"""Tkinter Canvas üstünde 96×96 LED matrisi görüntüleyicisi.
 
-`update_pixels(pixels)` çağrıldığında 256 hücrenin rengini günceller.
-Her hücre küçük bir kare; aralarda 2 piksel boşluk LED parıltısı hissi verir.
+`update_pixels(pixels)` çağrıldığında 9216 hücrenin rengini günceller.
+Her hücre küçük bir kare; aralarda 1 piksel boşluk LED parıltısı hissi verir.
 """
 from __future__ import annotations
 
 import tkinter as tk
 
-W, H = 32, 32
+W, H = 96, 96
 
 
 class MatrixView(tk.Frame):
