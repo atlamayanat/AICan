@@ -75,6 +75,9 @@ class LLMBridge:
         self.sanitize_responses = bool(config.get("sanitize_responses", True))
         # Ollama keep_alive — model RAM'de kalsin (sergi acilisi gecikmemesi icin)
         self.keep_alive = config.get("keep_alive", "60m")
+        # Ollama default num_ctx=4096, sistem promptumuz ~5000 token + tarihce ile
+        # kirpiliyor ve model tone/kural tablolarini goremiyor. 8192 rahat sigsin.
+        self.num_ctx = int(config.get("num_ctx", 8192))
 
         prompt_path = (base_dir / config["system_prompt_path"]).resolve()
         gestures_path = (base_dir / config["gestures_path"]).resolve()
@@ -168,8 +171,9 @@ class LLMBridge:
                     "model": self.model,
                     "prompt": "ok",
                     "stream": False,
+                    "think": False,
                     "keep_alive": self.keep_alive,
-                    "options": {"num_predict": 1, "temperature": 0.0},
+                    "options": {"num_predict": 1, "temperature": 0.0, "num_ctx": self.num_ctx},
                 },
                 timeout=120,
             )
@@ -272,9 +276,15 @@ class LLMBridge:
                     "stream": False,
                     "format": self._format_schema,
                     "keep_alive": self.keep_alive,
+                    # Qwen3 gibi "thinking" modellerinde dusunce tokenlari content'i
+                    # bos birakir ve num_predict limiti dolar -> empty_content hatasi.
+                    # think=false dusunceyi kapatir; thinking desteklemeyen modeller
+                    # (qwen2.5, gemma3) bu alani gormez.
+                    "think": False,
                     "options": {
                         "temperature": 0.2,
                         "top_p": 0.9,
+                        "num_ctx": self.num_ctx,
                         "num_predict": 120,
                         "repeat_penalty": 1.15,
                     },

@@ -1,0 +1,741 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>AI Body — Kontrol Paneli</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg-0: oklch(0.08 0.04 282);
+    --bg-1: oklch(0.11 0.05 285);
+    --ink-0: oklch(0.97 0.02 260);
+    --ink-1: oklch(0.78 0.04 260);
+    --ink-2: oklch(0.55 0.05 270);
+    --ink-3: oklch(0.40 0.05 270);
+    --neon-cyan: oklch(0.85 0.18 210);
+    --neon-magenta: oklch(0.72 0.26 340);
+    --neon-violet: oklch(0.65 0.25 295);
+    --neon-amber: oklch(0.82 0.16 75);
+    --neon-green: oklch(0.78 0.18 145);
+    --hairline: oklch(0.70 0.20 290 / 0.18);
+    --hairline-soft: oklch(0.70 0.20 290 / 0.10);
+    --grid-line: oklch(0.70 0.20 290 / 0.05);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    width: 100%;
+    height: 100vh;
+    background: var(--bg-0);
+    color: var(--ink-0);
+    font-family: 'Space Grotesk', sans-serif;
+    -webkit-font-smoothing: antialiased;
+    cursor: default;
+    overflow: hidden;
+  }
+
+  body {
+    background:
+      radial-gradient(ellipse 70% 50% at 50% 0%, oklch(0.18 0.10 290 / 0.5), transparent 60%),
+      radial-gradient(ellipse 60% 40% at 100% 100%, oklch(0.15 0.12 340 / 0.3), transparent 60%),
+      linear-gradient(180deg, oklch(0.07 0.04 282), oklch(0.05 0.03 285));
+  }
+
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(var(--grid-line) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+    background-size: 56px 56px;
+    pointer-events: none;
+    z-index: 0;
+    mask-image: radial-gradient(ellipse 80% 60% at 50% 40%, black 30%, transparent 90%);
+  }
+
+  /* ——— Layout ————————————————————————————————————— */
+  .shell {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    grid-template-rows: 60px 1fr;
+    height: 100vh;
+  }
+
+  header.top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 22px;
+    border-bottom: 1px solid var(--hairline-soft);
+    background: oklch(0.08 0.04 282 / 0.7);
+    backdrop-filter: blur(8px);
+  }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .brand-mark {
+    width: 24px;
+    height: 24px;
+    position: relative;
+    flex-shrink: 0;
+  }
+  .brand-mark::before, .brand-mark::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    border: 1.5px solid var(--neon-cyan);
+    box-shadow: 0 0 10px var(--neon-cyan);
+  }
+  .brand-mark::after {
+    inset: 5px;
+    border-color: var(--neon-magenta);
+    box-shadow: 0 0 8px var(--neon-magenta);
+    animation: spin 8s linear infinite;
+  }
+  .brand-mark .core {
+    position: absolute;
+    inset: 9px;
+    background: white;
+    border-radius: 50%;
+    box-shadow: 0 0 6px white;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .brand-title { font-size: 16px; font-weight: 600; letter-spacing: 0.28em; color: var(--ink-0); }
+  .brand-sub {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.26em;
+    color: var(--neon-magenta);
+    text-transform: uppercase;
+    margin-left: 6px;
+  }
+
+  .top-right {
+    display: flex;
+    gap: 24px;
+    align-items: center;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10.5px;
+    letter-spacing: 0.22em;
+    color: var(--ink-2);
+    text-transform: uppercase;
+  }
+  .conn { display: flex; align-items: center; gap: 9px; }
+  .conn .dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: oklch(0.55 0.18 30);
+    box-shadow: 0 0 8px oklch(0.55 0.18 30);
+  }
+  .conn .dot.ok {
+    background: var(--neon-green);
+    box-shadow: 0 0 8px var(--neon-green);
+    animation: pulseDot 2s ease-in-out infinite;
+  }
+  @keyframes pulseDot { 0%, 100% { opacity: 0.45; } 50% { opacity: 1; } }
+
+  /* Mikrofon (bas-bırak) butonu + durum etiketi */
+  .btn.mic {
+    background: oklch(0.22 0.16 25 / 0.55);
+    border-color: oklch(0.72 0.20 30);
+    color: oklch(0.95 0.10 80);
+  }
+  .btn.mic:hover {
+    background: oklch(0.32 0.20 25 / 0.7);
+    box-shadow: 0 0 14px oklch(0.72 0.22 30 / 0.45);
+  }
+  .btn.mic.recording {
+    background: oklch(0.48 0.28 25 / 0.7);
+    border-color: oklch(0.85 0.22 25);
+    color: white;
+    animation: micPulse 0.85s ease-in-out infinite;
+  }
+  .btn.mic:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+  @keyframes micPulse {
+    0%, 100% { box-shadow: 0 0 8px oklch(0.72 0.22 25 / 0.5); }
+    50%      { box-shadow: 0 0 22px oklch(0.85 0.25 25 / 0.95); }
+  }
+  .mic-status {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.18em;
+    color: var(--ink-2);
+    text-transform: uppercase;
+    padding: 4px 14px 10px;
+    min-height: 14px;
+  }
+  .mic-status.recording { color: oklch(0.85 0.22 25); }
+  .mic-status.busy      { color: var(--neon-cyan); }
+  .mic-status.error     { color: var(--neon-magenta); }
+  .mic-status.ok        { color: var(--neon-green); }
+
+  /* Karakter sayacı — limit yakın olunca uyar */
+  #char-count.warn { color: var(--neon-amber); }
+  #char-count.full { color: var(--neon-magenta); font-weight: 700; }
+
+  /* Görsel modu toggle butonu (header) */
+  .mode-toggle {
+    background: oklch(0.13 0.08 290 / 0.65);
+    border: 1px solid var(--neon-cyan);
+    color: var(--neon-cyan);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10.5px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    padding: 6px 12px;
+    cursor: pointer;
+    border-radius: 3px;
+    transition: all 0.15s;
+  }
+  .mode-toggle:hover {
+    background: oklch(0.22 0.14 290 / 0.85);
+    box-shadow: 0 0 10px oklch(0.85 0.18 210 / 0.35);
+  }
+  .mode-toggle.emoji {
+    border-color: var(--neon-magenta);
+    color: var(--neon-magenta);
+  }
+  .mode-toggle.emoji:hover {
+    box-shadow: 0 0 10px oklch(0.72 0.26 340 / 0.45);
+  }
+
+  /* Main grid — kompakt */
+  .main {
+    display: grid;
+    grid-template-columns: 260px minmax(0, 1fr) 340px;
+    gap: 12px;
+    padding: 12px;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  /* ——— Panel atoms ——————————————————————————————— */
+  .panel {
+    position: relative;
+    background: oklch(0.10 0.05 285 / 0.55);
+    border: 1px solid var(--hairline-soft);
+    border-radius: 4px;
+    backdrop-filter: blur(8px);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  .panel-h {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 9px 14px;
+    border-bottom: 1px solid var(--hairline-soft);
+    flex-shrink: 0;
+  }
+  .panel-h h2 {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.30em;
+    color: var(--neon-magenta);
+    text-transform: uppercase;
+  }
+  .panel-h h2::before {
+    content: '// ';
+    color: var(--ink-3);
+    margin-right: 2px;
+  }
+  .panel-h .h-aux {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 0.2em;
+    color: var(--ink-3);
+    text-transform: uppercase;
+  }
+  .panel-body { padding: 10px 14px; }
+
+  /* ——— Sol kolon: Durum + Model ——————————————————— */
+  .col-left {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 0;
+    min-height: 0;
+    overflow-y: auto;
+  }
+
+  .durum-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 12px;
+    color: var(--ink-1);
+    padding: 3px 0;
+  }
+  .durum-row .label { color: var(--ink-2); font-family: 'JetBrains Mono', monospace; font-size: 11px; letter-spacing: 0.1em; }
+  .durum-row .val { color: var(--ink-0); font-family: 'JetBrains Mono', monospace; font-size: 12px; }
+  .durum-row .val.good { color: var(--neon-green); }
+  .gesture-chip-inline {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 3px 9px;
+    background: oklch(0.18 0.10 290 / 0.5);
+    border: 1px solid var(--hairline);
+    border-radius: 999px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10.5px;
+    color: var(--ink-0);
+  }
+  .gesture-chip-inline .dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--neon-cyan);
+    box-shadow: 0 0 6px var(--neon-cyan);
+  }
+
+  .field-group { display: flex; flex-direction: column; gap: 5px; margin-bottom: 10px; }
+  .field-group:last-child { margin-bottom: 0; }
+  .field-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.2em;
+    color: var(--ink-2);
+    text-transform: lowercase;
+  }
+  .active-line {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .active-line .lbl { font-size: 10px; letter-spacing: 0.2em; color: var(--ink-2); }
+  .active-line .val { font-size: 14px; color: var(--neon-green); font-weight: 500; }
+
+  select, input[type="text"], textarea {
+    width: 100%;
+    padding: 7px 10px;
+    background: oklch(0.06 0.03 285 / 0.7);
+    border: 1px solid oklch(0.70 0.20 290 / 0.20);
+    color: var(--ink-0);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11.5px;
+    border-radius: 3px;
+    appearance: none;
+    -webkit-appearance: none;
+    outline: none;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+  select {
+    background-image: linear-gradient(45deg, transparent 50%, var(--ink-2) 50%),
+                      linear-gradient(135deg, var(--ink-2) 50%, transparent 50%);
+    background-position: calc(100% - 14px) 50%, calc(100% - 9px) 50%;
+    background-size: 5px 5px, 5px 5px;
+    background-repeat: no-repeat;
+    padding-right: 26px;
+  }
+  select option { background: var(--bg-1); color: var(--ink-0); }
+  select:focus, input:focus, textarea:focus {
+    border-color: var(--neon-cyan);
+    box-shadow: 0 0 0 1px var(--neon-cyan), 0 0 12px oklch(0.85 0.18 210 / 0.25);
+  }
+
+  .btn-row { display: flex; gap: 6px; margin-top: 2px; }
+  .btn {
+    flex: 1;
+    padding: 7px 10px;
+    background: oklch(0.13 0.08 290 / 0.6);
+    border: 1px solid var(--hairline);
+    color: var(--ink-0);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    cursor: pointer;
+    border-radius: 3px;
+    transition: all 0.15s;
+  }
+  .btn:hover {
+    background: oklch(0.20 0.12 290 / 0.7);
+    border-color: var(--neon-cyan);
+    box-shadow: 0 0 12px oklch(0.85 0.18 210 / 0.30);
+  }
+  .btn.primary {
+    background: oklch(0.30 0.15 220 / 0.5);
+    border-color: var(--neon-cyan);
+    color: var(--ink-0);
+    box-shadow: 0 0 10px oklch(0.85 0.18 210 / 0.30);
+  }
+  .btn.primary:hover {
+    background: oklch(0.40 0.20 220 / 0.6);
+    box-shadow: 0 0 18px oklch(0.85 0.18 210 / 0.50);
+  }
+  .btn.danger {
+    background: oklch(0.25 0.18 340 / 0.4);
+    border-color: var(--neon-magenta);
+  }
+  .btn.danger:hover {
+    background: oklch(0.35 0.22 340 / 0.5);
+    box-shadow: 0 0 16px oklch(0.72 0.26 340 / 0.45);
+  }
+
+  .note-line {
+    margin-top: 4px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9.5px;
+    color: var(--neon-magenta);
+    letter-spacing: 0.16em;
+    text-transform: lowercase;
+  }
+
+  /* ——— Orta kolon: Prompt + AI yanıt + jest grid ———————— */
+  .col-center {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 0;
+    min-height: 0;
+  }
+
+  .prompt-card .panel-body {
+    display: flex;
+    gap: 8px;
+    align-items: stretch;
+    padding: 11px 14px;
+  }
+  .prompt-input-wrap { flex: 1; position: relative; }
+  #prompt-input {
+    width: 100%;
+    padding: 11px 14px;
+    background: oklch(0.04 0.03 285 / 0.8);
+    border: 1px solid oklch(0.70 0.20 290 / 0.22);
+    color: var(--ink-0);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    border-radius: 3px;
+    outline: none;
+    transition: all 0.15s;
+  }
+  #prompt-input:focus {
+    border-color: var(--neon-cyan);
+    box-shadow: 0 0 0 1px var(--neon-cyan), 0 0 14px oklch(0.85 0.18 210 / 0.30);
+  }
+  #prompt-input::placeholder { color: var(--ink-3); }
+  .prompt-card .btn { flex: 0 0 auto; min-width: 88px; padding: 11px 16px; font-size: 10.5px; }
+
+  .reply-card { border-color: oklch(0.72 0.26 340 / 0.25); }
+  .reply-card .panel-h h2 { color: var(--neon-magenta); }
+  #ai-response {
+    padding: 18px 22px 20px;
+    font-size: 22px;
+    font-weight: 500;
+    line-height: 1.42;
+    color: var(--ink-0);
+    text-align: center;
+    min-height: 70px;
+    text-wrap: pretty;
+  }
+  #ai-response.empty {
+    color: var(--ink-3);
+    font-style: italic;
+    font-weight: 400;
+    font-size: 13px;
+    font-family: 'JetBrains Mono', monospace;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+  }
+
+  /* Jest grid */
+  .gesture-card {
+    flex: 1;
+    min-height: 0;
+  }
+  .gesture-card .panel-body {
+    padding: 10px 12px;
+    overflow-y: auto;
+    flex: 1;
+  }
+  #gesture-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 5px;
+  }
+  .gesture-chip {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 7px 10px;
+    background: oklch(0.07 0.04 285 / 0.6);
+    border: 1px solid var(--hairline-soft);
+    color: var(--ink-1);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10.5px;
+    letter-spacing: 0.02em;
+    cursor: pointer;
+    border-radius: 3px;
+    text-align: left;
+    transition: all 0.12s;
+    overflow: hidden;
+  }
+  .gesture-chip:hover {
+    background: oklch(0.16 0.10 290 / 0.7);
+    border-color: var(--hairline);
+    color: var(--ink-0);
+  }
+  .gesture-chip .chip-swatch {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .gesture-chip .chip-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* ——— Sağ kolon: Son komut + İstatistik + Olay kaydı ——————— */
+  .col-right {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 0;
+    min-height: 0;
+  }
+
+  .mini-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    flex-shrink: 0;
+  }
+
+  .summary-row, .stat-line {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 2.5px 0;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    gap: 8px;
+  }
+  .summary-row .k, .stat-line .k {
+    color: var(--ink-2);
+    letter-spacing: 0.1em;
+    flex-shrink: 0;
+  }
+  .summary-row .v, .stat-line .v {
+    color: var(--ink-0);
+    text-align: right;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* Olay kaydı — sağ kolonun kalan alanını kaplar */
+  .log-card {
+    flex: 1;
+    min-height: 0;
+  }
+  #event-log {
+    flex: 1;
+    overflow-y: auto;
+    padding: 9px 12px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10.5px;
+    line-height: 1.5;
+    color: var(--ink-1);
+    background: oklch(0.04 0.02 285 / 0.6);
+    scrollbar-width: thin;
+    scrollbar-color: oklch(0.30 0.10 285) transparent;
+  }
+  #event-log::-webkit-scrollbar { width: 6px; }
+  #event-log::-webkit-scrollbar-track { background: transparent; }
+  #event-log::-webkit-scrollbar-thumb { background: oklch(0.25 0.08 285); border-radius: 3px; }
+
+  .log-row { display: block; padding: 1.5px 0; word-wrap: break-word; }
+  .log-stamp { color: var(--ink-3); margin-right: 7px; font-size: 9.5px; }
+  .log-tag { font-weight: 600; margin-right: 5px; }
+  .log-tag-llm    { color: var(--neon-cyan); }
+  .log-tag-jest   { color: var(--neon-amber); }
+  .log-tag-sim    { color: var(--neon-green); }
+  .log-tag-yanit  { color: var(--neon-magenta); }
+  .log-tag-user   { color: var(--ink-0); }
+  .log-tag-sys    { color: var(--ink-2); }
+  .log-msg { color: var(--ink-1); }
+  .log-row.log-yanit .log-msg { color: var(--ink-0); }
+  .log-detail {
+    padding-left: 22px;
+    color: var(--ink-2);
+    font-size: 9.5px;
+  }
+
+  /* Responsive */
+  @media (max-width: 1400px) {
+    .main { grid-template-columns: 240px minmax(0, 1fr) 320px; }
+    #gesture-grid { grid-template-columns: repeat(4, 1fr); }
+  }
+  @media (max-width: 1200px) {
+    html, body { overflow-y: auto; height: auto; }
+    .shell { height: auto; }
+    .main {
+      grid-template-columns: 1fr;
+      grid-template-rows: auto auto auto;
+      overflow: visible;
+    }
+    .col-left, .col-right { overflow-y: visible; }
+    #event-log { max-height: 280px; }
+  }
+</style>
+</head>
+<body>
+  <div class="shell">
+
+    <!-- ÜST ŞERİT -->
+    <header class="top">
+      <div class="brand">
+        <div class="brand-mark"><div class="core"></div></div>
+        <div class="brand-title">AI&nbsp;BODY</div>
+        <span class="brand-sub">// KONTROL PANELİ</span>
+      </div>
+      <div class="top-right">
+        <button class="mode-toggle" id="mode-toggle" title="Görsel modunu değiştir (M)">GÖRSEL: DESEN</button>
+        <div class="conn">
+          <span class="dot" id="conn-dot"></span>
+          <span id="conn-text">SERGİ EKRANI ARANIYOR</span>
+        </div>
+        <div id="clock">00:00:00</div>
+      </div>
+    </header>
+
+    <!-- ANA -->
+    <div class="main">
+
+      <!-- SOL — Durum + Model -->
+      <aside class="col-left">
+
+        <section class="panel">
+          <div class="panel-h"><h2>Durum</h2></div>
+          <div class="panel-body">
+            <div class="durum-row"><span class="label">Ollama</span><span class="val good" id="ollama-status">— kontrol ediliyor</span></div>
+            <div class="durum-row"><span class="label">Aktif jest</span>
+              <span class="gesture-chip-inline" id="active-gesture"><span class="dot"></span>—</span>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-h"><h2>Model</h2></div>
+          <div class="panel-body">
+            <div class="field-group">
+              <div class="active-line">
+                <span class="lbl">aktif</span>
+                <span class="val" id="active-model">—</span>
+              </div>
+            </div>
+            <div class="field-group">
+              <label class="field-label">yüklü modeller</label>
+              <div class="select-wrap">
+                <select id="model-select"></select>
+              </div>
+              <div class="btn-row">
+                <button class="btn primary" id="activate-model">Aktif</button>
+                <button class="btn" id="refresh-models">Yenile</button>
+              </div>
+            </div>
+            <div class="field-group">
+              <label class="field-label">yeni model indir</label>
+              <input type="text" id="new-model-input" placeholder="qwen2.5:14b" />
+              <button class="btn danger" id="download-model">İndir</button>
+              <div class="note-line" id="active-note"></div>
+            </div>
+          </div>
+        </section>
+
+      </aside>
+
+      <!-- ORTA — Prompt + AI yanıt + jest grid -->
+      <main class="col-center">
+
+        <section class="panel prompt-card">
+          <div class="panel-h">
+            <h2>Prompt</h2>
+            <div class="h-aux"><span id="char-count">0 / 240</span> · ENTER → GÖNDER</div>
+          </div>
+          <div class="panel-body">
+            <div class="prompt-input-wrap">
+              <input type="text" id="prompt-input" placeholder="Sergi ziyaretçisinin mesajını yaz…" autofocus maxlength="240" />
+            </div>
+            <button class="btn primary" id="send-btn">GÖNDER</button>
+            <button class="btn mic" id="mic-btn" title="Basılı tut, konuş, bırak">🎤 KONUŞ</button>
+            <button class="btn danger" id="stop-btn">DURDUR</button>
+          </div>
+          <div class="mic-status" id="mic-status">mikrofon hazır değil</div>
+        </section>
+
+        <section class="panel reply-card">
+          <div class="panel-h">
+            <h2>AI Yanıtı</h2>
+            <div class="h-aux">// SERGİ EKRANINDA GÖRÜNECEK</div>
+          </div>
+          <div id="ai-response" class="empty">yanıt bekleniyor</div>
+        </section>
+
+        <section class="panel gesture-card">
+          <div class="panel-h">
+            <h2>Hızlı Jest</h2>
+            <div class="h-aux">31 JEST</div>
+          </div>
+          <div class="panel-body">
+            <div id="gesture-grid"></div>
+          </div>
+        </section>
+
+      </main>
+
+      <!-- SAĞ — Son komut + İstatistik (yan yana) + Olay kaydı -->
+      <aside class="col-right">
+
+        <div class="mini-grid">
+          <section class="panel">
+            <div class="panel-h"><h2>Son komut</h2></div>
+            <div class="panel-body">
+              <div class="summary-row"><span class="k">jest:</span><span class="v" id="last-gesture">—</span></div>
+              <div class="summary-row"><span class="k">yoğ:</span><span class="v" id="last-intensity">—</span></div>
+              <div class="summary-row"><span class="k">süre:</span><span class="v" id="last-duration">—</span></div>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-h"><h2>İstatistik</h2></div>
+            <div class="panel-body">
+              <div class="stat-line"><span class="k">düşünme:</span><span class="v" id="stat-think">— sn</span></div>
+              <div class="stat-line"><span class="k">yükl:</span><span class="v" id="stat-load">0.2 sn</span></div>
+              <div class="stat-line"><span class="k">tok:</span><span class="v" id="stat-tokens">0 → 0</span></div>
+              <div class="stat-line"><span class="k">hız:</span><span class="v" id="stat-rate">— tok/s</span></div>
+            </div>
+          </section>
+        </div>
+
+        <section class="panel log-card">
+          <div class="panel-h">
+            <h2>Olay Kaydı</h2>
+            <div class="h-aux">CANLI · 200 KAYIT</div>
+          </div>
+          <div id="event-log"></div>
+        </section>
+
+      </aside>
+
+    </div>
+
+  </div>
+
+  <script src="led-panel.js"></script>
+  <script src="control.js"></script>
+</body>
+</html>

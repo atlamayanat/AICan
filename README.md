@@ -336,3 +336,14 @@ Performans, Token kullanımı, RAM, Kategori dağılımı, En sık jestler...
 - **Gerçek donanım:** ESP32 + WS2812B 32×32 panel (HUB75) ile fiziksel sergiye taşınabilir. Aynı `gestures.json` ve sistem promptu kullanılır; sadece firmware (`src/main.cpp`) yeniden yazılması gerekir.
 - **Daha iyi model:** RAM yeterse `qwen2.5:7b-instruct` (4.4 GB, daha iyi Türkçe), `qwen2.5:14b-instruct` (9 GB, premium kalite).
 - **Çoklu dil:** sistem promptu İngilizce'ye çevrilirse aynı sistem İngilizce ziyaretçilerle de çalışabilir.
+
+---
+
+## 🙏 Atıflar / Açık Kaynak
+
+Web arayüzündeki **otonom "canlı göz" idle animasyonu** ([web/led-panel.js](web/led-panel.js) içindeki `EyeSystem` sınıfı) aşağıdaki açık kaynak projelerin mantığından ilham alınarak — kod birebir kopyalanmadan — projenin 96×96 Canvas pipeline'ına yeniden uyarlanmıştır:
+
+- **FluxGarage / RoboEyes** (Arduino/C++, MIT) — parametrik göz çizimi, `autoblinker`, `idle`, `curiosity`, `tired` davranış mantığı. <https://github.com/FluxGarage/RoboEyes>
+- **sidikalamini / eyes-animation** (Python/Pygame) — akışkan pupil hareketi ve durum geçişleri için referans. <https://github.com/sidikalamini/eyes-animation>
+
+Lisans uyumluluğu: yukarıdaki projelerden kod paylaşımı yapılmamış, yalnızca davranış tasarımı (göz parametreleri, kırpma/bakınma/uyku durumları, organik zamanlama) referans alınmıştır. Sergi tarafındaki implementasyon tamamen bu proje için yazılmıştır.

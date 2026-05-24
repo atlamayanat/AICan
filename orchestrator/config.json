@@ -1,6 +1,6 @@
 {
   "ollama_url": "http://localhost:11434",
-  "ollama_model": "qwen2.5:3b-instruct",
+  "ollama_model": "gemma3:4b",
   "use_baked_prompt": false,
   "system_prompt_path": "../ai/system_prompt.txt",
   "gestures_path": "../ai/gestures.json",
@@ -8,7 +8,10 @@
   "request_timeout_sec": 35,
   "history_max_turns": 6,
   "keep_alive": "60m",
+  "num_ctx": 8192,
   "warmup_on_start": true,
   "mirror_override_enabled": true,
-  "sanitize_responses": true
+  "sanitize_responses": true,
+  "max_user_input_chars": 240,
+  "max_record_seconds": 30
 }
