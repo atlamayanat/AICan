@@ -498,6 +498,35 @@
     white-space: nowrap;
   }
 
+  /* ——— Oyun paneli ——————————————————————————————————— */
+  .game-card .panel-h h2 { color: var(--neon-amber); }
+  .game-card .panel-body { display: flex; flex-direction: column; gap: 8px; }
+  #game-score { color: var(--neon-amber); letter-spacing: 0.14em; }
+  .game-buttons { display: flex; gap: 6px; flex-wrap: wrap; }
+  .game-buttons:empty { display: none; }
+  .game-buttons .btn { flex: 1 1 auto; min-width: 72px; }
+  .game-buttons .btn.game-move { letter-spacing: 0.06em; font-size: 11px; text-transform: none; }
+
+  /* ——— Kelime oyunu zaman barı (kontrol paneli) ——————————— */
+  .word-timer { display: flex; flex-direction: column; gap: 4px; }
+  .word-timer.hidden { display: none; }
+  .word-timer .wt-row {
+    display: flex; justify-content: space-between; align-items: baseline;
+    font-family: 'JetBrains Mono', monospace; font-size: 11px;
+  }
+  .word-timer .wt-label { color: var(--ink-1); letter-spacing: 0.08em; }
+  .word-timer.ai .wt-label { color: var(--neon-cyan); }
+  .word-timer .wt-num { color: var(--neon-amber); font-weight: 600; font-size: 14px; }
+  .word-timer .wt-track {
+    height: 8px; border-radius: 6px; overflow: hidden;
+    background: oklch(0.22 0.04 270 / 0.6);
+  }
+  .word-timer .wt-fill {
+    height: 100%; width: 100%; border-radius: 6px;
+    background: linear-gradient(90deg, var(--neon-cyan), var(--neon-amber));
+  }
+  .word-timer .wt-fill.low { background: linear-gradient(90deg, #ff7a3c, #ff3b3b); }
+
   /* ——— Sağ kolon: Son komut + İstatistik + Olay kaydı ——————— */
   .col-right {
     display: flex;
@@ -675,6 +704,21 @@
             <button class="btn danger" id="stop-btn">DURDUR</button>
           </div>
           <div class="mic-status" id="mic-status">mikrofon hazır değil</div>
+        </section>
+
+        <section class="panel game-card">
+          <div class="panel-h">
+            <h2>Oyun</h2>
+            <div class="h-aux" id="game-score">—</div>
+          </div>
+          <div class="panel-body">
+            <button class="btn primary" id="game-start-btn">🎮 OYUN OYNAYALIM</button>
+            <div class="game-buttons" id="game-buttons"></div>
+            <div class="word-timer hidden" id="word-timer">
+              <div class="wt-row"><span class="wt-label">—</span><span class="wt-num"></span></div>
+              <div class="wt-track"><div class="wt-fill"></div></div>
+            </div>
+          </div>
         </section>
 
         <section class="panel reply-card">

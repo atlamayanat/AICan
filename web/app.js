@@ -25,6 +25,9 @@
     testList: $('#test-list'),
     testPanel: $('#test-panel'),
     controls: document.querySelector('.controls'),
+    gameHud: $('#game-hud'),
+    winFlash: $('#win-flash'),
+    wordTimer: $('#word-timer'),
   };
 
   let panel;
@@ -87,6 +90,64 @@
       }, speed);
       activeTypewriter = { el, id };
     });
+  }
+
+  // ——— Seslendirme (TTS) ————————————————————————————————————————
+  // AI cevabi geldiginde /api/speak'ten duyguya gore tonlanmis sesi cek ve cal.
+  // Ses, yazi (typewriter) ile PARALEL baslar; ses backend'de CPU'da uretilir.
+  let ttsEnabled = true;       // 'S' tusu ile acilip kapanir
+  let ttsReady = false;        // backend motoru hazir mi (bilgi amacli)
+  let ttsPrimed = false;       // tarayici autoplay kilidi acildi mi
+  let currentAudio = null;
+
+  async function checkTtsStatus() {
+    try {
+      const r = await fetch('/api/speak/status');
+      const d = await r.json();
+      // autoplay=false veya enabled=false ise sesi hic deneme
+      ttsEnabled = (d.enabled !== false) && (d.autoplay !== false);
+      ttsReady = !!d.ready;
+    } catch (_) { ttsReady = false; }
+  }
+
+  // Tarayici autoplay politikasi: ilk kullanici etkilesiminde sesi "ac".
+  // (Sergi kiosk'unda gorevli sayfayla bir kez etkilesince ses acilir.)
+  function primeAudio() {
+    if (ttsPrimed) return;
+    ttsPrimed = true;
+    try {
+      const a = new Audio(
+        'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA=');
+      a.volume = 0;
+      a.play().catch(() => {});
+    } catch (_) {}
+  }
+
+  async function speak(text, jestId, yogunluk) {
+    if (!ttsEnabled || !text) return;
+    try {
+      if (currentAudio) { try { currentAudio.pause(); } catch (_) {} currentAudio = null; }
+      const r = await fetch('/api/speak', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: text,
+          jest_id: jestId || '',
+          yogunluk: (typeof yogunluk === 'number' ? yogunluk : 0.7),
+        }),
+      });
+      if (!r.ok) { if (r.status !== 503) console.warn('TTS HTTP', r.status); return; }
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      const a = new Audio(url);
+      currentAudio = a;
+      const cleanup = () => URL.revokeObjectURL(url);
+      a.onended = cleanup;
+      a.onerror = cleanup;
+      a.play().catch((e) => console.warn('Ses oynatilamadi (autoplay kilidi?)', e));
+    } catch (e) {
+      console.warn('TTS hata:', e);
+    }
   }
 
   // ——— Jesti tetikle ————————————————————————————————————————————
@@ -204,6 +265,73 @@
     try { return localStorage.getItem('aibody.mode') || 'desen'; } catch (_) { return 'desen'; }
   }
 
+  // ——— Sarı kazanç ışığı (AI tur kazandığında ekran bir kez parlar) ——
+  // Aktif jest rengini sıcak altın sarısına çevirir + kısa bir parlama efekti.
+  // Bir sonraki jest geldiğinde renk doğal olarak kendi jestine döner.
+  const WIN_GLOW = [255, 205, 70];     // sıcak altın sarısı
+  const WIN_GLOW_2 = [255, 145, 45];   // turuncu vurgu
+  let winFlashTimer = null;
+  function triggerWinFlash() {
+    const root = document.documentElement.style;
+    root.setProperty('--gesture-glow', WIN_GLOW.join(','));
+    root.setProperty('--gesture-glow-2', WIN_GLOW_2.join(','));
+    const flash = els.winFlash;
+    if (!flash) return;
+    flash.classList.remove('on');
+    void flash.offsetWidth;            // reflow — animasyonu baştan başlat
+    flash.classList.add('on');
+    if (winFlashTimer) clearTimeout(winFlashTimer);
+    winFlashTimer = setTimeout(() => flash.classList.remove('on'), 1600);
+  }
+
+  // ——— Kelime oyunu zaman barı (sergi ekranı) ————————————————
+  // control.js otorite; burada yalnızca görsel geri sayım gösterilir.
+  let dispTimer = { id: null };
+  function startDisplayTimer(seconds, who) {
+    const bar = els.wordTimer;
+    if (!bar) return;
+    stopDisplayTimer();
+    const fill = bar.querySelector('.wt-fill');
+    const label = bar.querySelector('.wt-label');
+    const num = bar.querySelector('.wt-num');
+    bar.classList.remove('hidden');
+    bar.classList.toggle('ai', who === 'ai');
+    if (label) label.textContent = (who === 'ai') ? 'AICAN düşünüyor…' : 'SENİN SIRAN';
+    const endsAt = Date.now() + seconds * 1000;
+    const tick = () => {
+      const remain = Math.max(0, (endsAt - Date.now()) / 1000);
+      if (num) num.textContent = Math.ceil(remain) + ' sn';
+      if (fill) {
+        fill.style.width = (remain / seconds) * 100 + '%';
+        fill.classList.toggle('low', remain <= 5);
+      }
+      if (remain <= 0) stopDisplayTimer();
+    };
+    tick();
+    dispTimer.id = setInterval(tick, 100);
+    noteInteraction();
+  }
+  function stopDisplayTimer() {
+    if (dispTimer.id) { clearInterval(dispTimer.id); dispTimer.id = null; }
+    if (els.wordTimer) els.wordTimer.classList.add('hidden');
+  }
+
+  // ——— Oyun skor HUD ————————————————————————————————————
+  function updateGameHud(active, score) {
+    if (!els.gameHud) return;
+    if (active && score) {
+      els.gameHud.innerHTML =
+        '<span class="ghud-lbl">BEN</span>' +
+        '<span class="ghud-num">' + score.ai + '</span>' +
+        '<span class="ghud-sep">·</span>' +
+        '<span class="ghud-num">' + score.user + '</span>' +
+        '<span class="ghud-lbl">SEN</span>';
+      els.gameHud.classList.remove('hidden');
+    } else {
+      els.gameHud.classList.add('hidden');
+    }
+  }
+
   // ——— Kontrol paneli ile haberlesme ———————————————————————
   function initChannel() {
     let bc;
@@ -231,9 +359,22 @@
         if (d.jest_id) {
           triggerGesture(d.jest_id, { intensity: d.yogunluk });
         }
-        await sleep(350);
+        // AI tur kazandıysa ekranı sarıya boğ (triggerGesture'dan SONRA override).
+        if (d.outcome === 'ai_win') triggerWinFlash();
+        // Kullanıcı metni typewriter'ı bitsin diye kısa tampon (Faz 3'te 350→180 ms).
+        await sleep(180);
         if (els.rightPlaceholder) els.rightPlaceholder.style.display = 'none';
-        if (d.yanit) await typeInto(els.aiText, d.yanit, 22);
+        if (d.yanit) {
+          speak(d.yanit, d.jest_id, d.yogunluk);   // sesi yaziyla paralel baslat
+          await typeInto(els.aiText, d.yanit, 22);
+        }
+        // AI "bir daha oynayalım" diye ısrar ediyorsa metni hafifçe nabızlat.
+        if (d.insist && els.aiText) {
+          els.aiText.classList.remove('insist');
+          void els.aiText.offsetWidth;
+          els.aiText.classList.add('insist');
+          setTimeout(() => els.aiText.classList.remove('insist'), 2400);
+        }
       } else if (d.type === 'manual_gesture') {
         if (els.leftPlaceholder) els.leftPlaceholder.style.display = 'none';
         if (d.jest_id) triggerGesture(d.jest_id);
@@ -246,6 +387,16 @@
       } else if (d.type === 'stop') {
         const idle = gestureMap.has('huzur') ? 'huzur' : 'meditatif';
         if (gestureMap.has(idle)) triggerGesture(idle, { duration: 99999999 });
+      } else if (d.type === 'game_score') {
+        updateGameHud(d.active, d.score);
+      } else if (d.type === 'timer_start') {
+        startDisplayTimer(d.seconds, d.who);
+      } else if (d.type === 'timer_stop') {
+        stopDisplayTimer();
+      } else if (d.type === 'game_exit') {
+        updateGameHud(false, null);
+        stopDisplayTimer();
+        if (els.userText) els.userText.textContent = '';
       }
     };
     bc.postMessage({ type: 'display_ready', mode: panel ? panel.mode : 'desen' });
@@ -274,6 +425,11 @@
       if (document.fullscreenElement) document.exitFullscreen();
       else document.documentElement.requestFullscreen();
     }
+    if (e.key === 's' || e.key === 'S') {
+      ttsEnabled = !ttsEnabled;
+      if (!ttsEnabled && currentAudio) { try { currentAudio.pause(); } catch (_) {} }
+      if (els.statusText) els.statusText.textContent = ttsEnabled ? 'BAGLI' : 'BAGLI · SES KAPALI';
+    }
   });
 
   // ——— Init ————————————————————————————————————————————————
@@ -299,6 +455,10 @@
     applyMode(loadStoredMode());
     buildTestPanel();
     initChannel();
+    checkTtsStatus();
+    // Autoplay kilidini ilk etkilesimde ac (kiosk: gorevli bir kez tiklar/tusa basar)
+    window.addEventListener('pointerdown', primeAudio, { once: true });
+    window.addEventListener('keydown', primeAudio, { once: true });
 
     if (els.controls) els.controls.style.display = 'none';
 

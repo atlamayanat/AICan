@@ -38,6 +38,10 @@
     micBtn: $('#mic-btn'),
     micStatus: $('#mic-status'),
     charCount: $('#char-count'),
+    gameStartBtn: $('#game-start-btn'),
+    gameButtons: $('#game-buttons'),
+    gameScore: $('#game-score'),
+    wordTimer: $('#word-timer'),
   };
 
   let currentMode = 'desen'; // 'desen' | 'emoji'
@@ -430,6 +434,19 @@
       log('sys', 'iptal: prompt ' + text.length + ' / ' + MAX_CHARS + ' karakter sınırını aşıyor');
       return;
     }
+
+    // ——— Oyun modu yönlendirmesi ———
+    // Aktif oyun varsa girdi oyuna gider; "OYUN OYNAYALIM" hazır komutu oyunu başlatır.
+    if (gamePhase || isGameTrigger(text)) {
+      log('user', '> ' + text);
+      els.prompt.value = '';
+      updateCharCount();
+      if (gamePhase) await submitGameInput(text, null);
+      else await startGame(text);
+      els.prompt.focus();
+      return;
+    }
+
     log('user', '> ' + text);
     els.prompt.value = '';
     updateCharCount();
@@ -504,11 +521,252 @@
   }
 
   function handleStop() {
+    if (gamePhase) {
+      // Oyundayken DURDUR -> oyundan çık (sohbet moduna dön)
+      gamePhase = null;
+      stopWordTimer();
+      fetch('/api/game/exit', { method: 'POST' }).catch(() => {});
+      sendToDisplay({ type: 'game_exit' });
+      hideGameUI();
+    }
     sendToDisplay({ type: 'stop' });
     const idle = gestureMap.has('huzur') ? 'huzur'
               : (gestureMap.has('meditatif') ? 'meditatif' : null);
     if (idle) triggerGesture(idle, { duration: 99999999 });
     log('sys', 'durduruldu');
+  }
+
+  // ——— Oyun modu —————————————————————————————————————————
+  // Oyun mantığı backend'de (game_engine.py). Burası ince yönlendirici:
+  // hazır komutu yakalar, /api/game/* çağırır, sergiye yansıtır, dokunmatik buton render eder.
+  let gamePhase = null; // null | 'menu' | 'rps'
+
+  function normalizeTr(s) {
+    s = (s || '')
+      .replace(/[İI]/g, 'i').replace(/Ç/g, 'c').replace(/Ğ/g, 'g')
+      .replace(/Ö/g, 'o').replace(/Ş/g, 's').replace(/Ü/g, 'u')
+      .toLowerCase()
+      .replace(/[çğıöşü âîû]/g, (c) => (
+        { 'ç': 'c', 'ğ': 'g', 'ı': 'i', 'ö': 'o', 'ş': 's', 'ü': 'u', 'â': 'a', 'î': 'i', 'û': 'u', ' ': ' ' }[c] || c
+      ));
+    return s.replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
+  }
+  function isGameTrigger(text) {
+    const n = normalizeTr(text);
+    if (n === 'oyun' || n === 'oyna' || n === 'oyun modu') return true;
+    return /\boyun\s*oyna/.test(n);
+  }
+
+  async function startGame(triggerText) {
+    sendToDisplay({ type: 'user_text', text: triggerText || 'Oyun oynayalım' });
+    log('sys', 'oyun modu başlatılıyor');
+    try {
+      const r = await fetch('/api/game/start', { method: 'POST' });
+      await applyGamePayload(await r.json());
+    } catch (e) {
+      log('sys', 'oyun başlatılamadı: ' + e.message);
+    }
+  }
+
+  // Kelime doğrulaması/AI beklerken sergiye ara geri bildirim: bekle jesti + kısa metin.
+  function showThinking(msg) {
+    sendToDisplay({ type: 'ai_reply', jest_id: 'bekle', yanit: msg, yogunluk: 0.6 });
+    if (gestureMap.has('bekle')) triggerGesture('bekle', { intensity: 0.6 });
+    if (els.aiResponse) {
+      els.aiResponse.textContent = msg;
+      els.aiResponse.classList.remove('empty');
+    }
+  }
+
+  async function submitGameInput(text, displayText) {
+    sendToDisplay({ type: 'user_text', text: displayText || text });
+    // Kullanıcı cevap verince geri sayımı HEMEN durdur: yanlış "süre doldu" tetiklenmesini
+    // ve istek-yarışını önler (doğrulama LLM'e giderse sayaç dönmeye devam etmemeli).
+    const wasUserWordTurn = (gamePhase === 'kelime' && wordTimer.who === 'user' && !!wordTimer.id);
+    stopWordTimer();
+    // Doğrulama yerel sözlükte yoksa LLM'e gidebilir; >450ms sürerse ekranda
+    // "bakıyorum" + bekle jesti göster (ziyaretçi ekranı donmuş sanmasın).
+    let thinkTimer = null;
+    if (wasUserWordTurn) {
+      thinkTimer = setTimeout(() => showThinking('Hmm, bakıyorum…'), 450);
+    }
+    try {
+      const r = await fetch('/api/game/input', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+      });
+      const data = await r.json();
+      if (thinkTimer) { clearTimeout(thinkTimer); thinkTimer = null; }
+      if (data.error) { log('sys', 'oyun hatası: ' + data.error); return; }
+      await applyGamePayload(data);
+    } catch (e) {
+      if (thinkTimer) { clearTimeout(thinkTimer); thinkTimer = null; }
+      log('sys', 'oyun ağ hatası: ' + e.message);
+    }
+  }
+
+  async function applyGamePayload(p) {
+    if (!p) return;
+    gamePhase = (p.phase && p.phase !== 'idle') ? p.phase : null;
+    const isWord = (p.game === 'kelime');
+
+    // Sergi ekranında kullanıcı hamlesinin typewriter'ı bitsin diye kısa bekle
+    // (aynı anda ai-text yazılırsa user-text kesilir) — ayrıca "düşünme" hissi verir.
+    // Kullanıcı metni typewriter'ı (kısa oyun girdisi) bitsin diye küçük tampon;
+    // bekleme hissini azaltmak için Faz 3'te kısaltıldı.
+    const gap = (p.kind === 'round') ? 480
+              : (isWord && p.kind === 'ai_word') ? 320 : 260;
+    await new Promise((res) => setTimeout(res, gap));
+
+    sendToDisplay({
+      type: 'ai_reply',
+      jest_id: p.jest_id,
+      yanit: p.yanit || '',
+      yogunluk: p.yogunluk,
+      outcome: p.outcome || null,   // sergi: AI kazaninca sari isik
+      insist: !!p.insist,           // sergi: "bir daha oynayalim" israri vurgusu
+    });
+    if (p.jest_id) triggerGesture(p.jest_id, { intensity: p.yogunluk });
+    if (els.aiResponse) {
+      els.aiResponse.textContent = p.yanit || '';
+      els.aiResponse.classList.remove('empty');
+    }
+
+    if (p.score) {
+      sendToDisplay({ type: 'game_score', score: p.score, active: true });
+      updateGameScoreUI(p.score);
+    }
+    renderGameButtons(p.buttons || []);
+
+    if (p.kind === 'round') {
+      log('jest', 'oyun: ' + p.outcome + ' → ' + p.jest_id
+        + (p.insist ? ' (ısrar)' : '')
+        + ' | BEN ' + p.score.ai + ' - ' + p.score.user + ' SEN');
+    } else if (isWord) {
+      log('jest', 'kelime: ' + p.kind
+        + (p.required_letter ? " → '" + p.required_letter + "'" : '')
+        + (p.outcome ? ' | ' + p.outcome : ''));
+    } else {
+      log('sys', 'oyun: ' + p.kind);
+    }
+
+    if (p.ai_error) {
+      log('sys', '⚠ Ollama erişilemedi — AI gerçek pes etmedi, kontrol et (model/servis)');
+    }
+
+    // ——— Kelime oyunu: zaman barı + otomatik AI turu ———
+    if (isWord) {
+      if (p.ended || !p.timer) stopWordTimer();
+      else startWordTimer(p.timer.seconds, p.timer.who);
+      // Sıra AI'da ise (kullanıcı kelimesi kabul edildi) AI'nın cevabını iste.
+      if (!p.ended && p.turn === 'ai') requestAiTurn();
+    }
+
+    if (p.ended) {
+      if (isWord) {
+        // Kelime maçı bitti: timer dur, "Yeni oyun/Çıkış" butonları + skor kalır.
+        // gamePhase üstte 'kelime' kaldı (p.phase==='kelime') → tekrar oynanabilir.
+        stopWordTimer();
+      } else {
+        gamePhase = null;
+        sendToDisplay({ type: 'game_exit' });
+        hideGameUI();
+      }
+    }
+  }
+
+  // ——— Kelime oyunu: AI turu + zaman barı ————————————————————
+  async function requestAiTurn() {
+    try {
+      const r = await fetch('/api/game/ai_turn', { method: 'POST' });
+      const data = await r.json();
+      if (data.error) { log('sys', 'kelime AI hatası: ' + data.error); return; }
+      await applyGamePayload(data);
+    } catch (e) {
+      log('sys', 'kelime AI ağ hatası: ' + e.message);
+    }
+  }
+
+  async function submitGameTimeout() {
+    log('sys', 'kelime: süre doldu');
+    try {
+      const r = await fetch('/api/game/input', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ timeout: true }),
+      });
+      const data = await r.json();
+      if (!data.error) await applyGamePayload(data);
+    } catch (e) {
+      log('sys', 'kelime timeout ağ hatası: ' + e.message);
+    }
+  }
+
+  // control.js geri sayım otoritesi: sergiye timer_start/stop yansıtır;
+  // yalnız kullanıcı turunda süre dolunca backend'e timeout bildirir.
+  let wordTimer = { id: null, who: null, endsAt: 0, total: 0 };
+  function startWordTimer(seconds, who) {
+    stopLocalTimer();
+    wordTimer = { id: null, who: who, endsAt: Date.now() + seconds * 1000, total: seconds };
+    sendToDisplay({ type: 'timer_start', seconds: seconds, who: who });
+    renderControlTimer(seconds, seconds, who);
+    wordTimer.id = setInterval(() => {
+      const remain = Math.max(0, (wordTimer.endsAt - Date.now()) / 1000);
+      renderControlTimer(remain, wordTimer.total, who);
+      if (remain <= 0) {
+        const wasUser = (wordTimer.who === 'user');
+        stopLocalTimer();
+        if (els.wordTimer) els.wordTimer.classList.add('hidden');
+        if (wasUser) submitGameTimeout();
+      }
+    }, 100);
+  }
+  function stopLocalTimer() {
+    if (wordTimer.id) { clearInterval(wordTimer.id); wordTimer.id = null; }
+  }
+  function stopWordTimer() {
+    stopLocalTimer();
+    sendToDisplay({ type: 'timer_stop' });
+    if (els.wordTimer) els.wordTimer.classList.add('hidden');
+  }
+  function renderControlTimer(remain, total, who) {
+    const el = els.wordTimer;
+    if (!el) return;
+    el.classList.remove('hidden');
+    el.classList.toggle('ai', who === 'ai');
+    const label = el.querySelector('.wt-label');
+    const num = el.querySelector('.wt-num');
+    const fill = el.querySelector('.wt-fill');
+    if (label) label.textContent = (who === 'ai') ? 'AICAN düşünüyor…' : 'SEN — cevap ver';
+    if (num) num.textContent = Math.ceil(remain) + ' sn';
+    if (fill) {
+      fill.style.width = (total > 0 ? (remain / total) * 100 : 0) + '%';
+      fill.classList.toggle('low', remain <= 5);
+    }
+  }
+
+  function renderGameButtons(buttons) {
+    if (!els.gameButtons) return;
+    els.gameButtons.innerHTML = '';
+    buttons.forEach((b) => {
+      const btn = document.createElement('button');
+      btn.className = 'btn game-move' + (b.key === 'cikis' ? ' danger' : '');
+      btn.textContent = b.label;
+      btn.addEventListener('click', () => submitGameInput(b.key, b.label));
+      els.gameButtons.appendChild(btn);
+    });
+  }
+  function updateGameScoreUI(score) {
+    if (els.gameScore) {
+      els.gameScore.textContent = 'BEN ' + score.ai + ' · ' + score.user + ' SEN'
+        + (score.draw ? ' · ' + score.draw + ' berabere' : '');
+    }
+  }
+  function hideGameUI() {
+    if (els.gameButtons) els.gameButtons.innerHTML = '';
+    if (els.gameScore) els.gameScore.textContent = '—';
+    stopWordTimer();
   }
 
   // ——— Hizli jest grid ——————————————————————————————
@@ -646,6 +904,7 @@
 
     if (els.sendBtn) els.sendBtn.addEventListener('click', handleSend);
     if (els.stopBtn) els.stopBtn.addEventListener('click', handleStop);
+    if (els.gameStartBtn) els.gameStartBtn.addEventListener('click', () => startGame('Oyun oynayalım'));
     if (els.prompt) els.prompt.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();

@@ -20,8 +20,9 @@ import threading
 import webbrowser
 from pathlib import Path
 
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, Response, jsonify, request, send_from_directory
 
+from game_engine import GameEngine
 from llm_bridge import LLMBridge
 from session_logger import SessionLogger
 
@@ -41,7 +42,8 @@ EMOJI_BASE_DIR = ASSETS_DIR / "emojis"
 EMOJI_FPS = 12  # gesture_engine.EMOJI_FPS ile esit kalmali
 
 # Whisper (ses-metin) ayarlari — KARAR 1: small, CPU, int8, tr.
-# CPU'da kalir cunku 4GB VRAM zaten qwen3:4b ile dolu.
+# CPU'da kalir cunku 4GB VRAM zaten aktif LLM (config.ollama_model,
+# orn. qwen3:4b-instruct-2507) ile dolu.
 WHISPER_MODEL_SIZE = "small"
 WHISPER_DEVICE = "cpu"
 WHISPER_COMPUTE_TYPE = "int8"
@@ -91,10 +93,67 @@ def _load_whisper_async(state: WhisperState, model_size: str) -> None:
         log.warning("Whisper yuklenemedi: %s", e)
 
 
+class TTSState:
+    """Tembel yuklenmis TTS motoru + durum. Whisper ile ayni desen."""
+
+    def __init__(self) -> None:
+        self.engine = None       # tts.engine_base.TTSEngine | None
+        self.status = "yok"      # "yok" | "yukleniyor" | "hazir" | "hata"
+        self.error = ""
+        self._lock = threading.Lock()  # tek model -> seri sentez
+
+    def is_ready(self) -> bool:
+        return self.engine is not None and self.status == "hazir"
+
+
+def _load_tts_async(state: "TTSState", config: dict) -> None:
+    """TTS motorunu arka planda yukler — HTTP yanitlarini geciktirmez.
+    use_cuda=False: 4GB VRAM aktif LLM (Ollama) ile dolu; TTS CPU'da kalir
+    (Piper RTF ~0.05, gercek-zamandan cok hizli)."""
+    state.status = "yukleniyor"
+    try:
+        def _make_piper(voice_key: str):
+            from tts.engine_piper import PiperEngine
+            return PiperEngine(
+                voice=config.get(voice_key, "tr_TR-dfki-medium"),
+                use_cuda=False,
+                pitch_enabled=bool(config.get("tts_pitch_enabled", True)),
+            )
+
+        engine_name = config.get("tts_engine", "piper")
+        if engine_name == "edge":
+            # Birincil: edge-tts (cevrimici). Yedek: Piper (cevrimdisi) — internet
+            # kesilirse sergi susmasin diye FallbackEngine otomatik gecer.
+            from tts.engine_edge import EdgeEngine
+            from tts.engine_base import FallbackEngine
+            primary = EdgeEngine(voice=config.get("tts_voice", "tr-TR-EmelNeural"))
+            if config.get("tts_fallback_enabled", True):
+                state.engine = FallbackEngine(primary, _make_piper("tts_fallback_voice"))
+                log.info("TTS hazir (edge=%s + cevrimdisi yedek piper=%s).",
+                         primary.voice_name, state.engine.fallback.voice_name)
+            else:
+                state.engine = primary
+                log.info("TTS hazir (edge=%s, yedek yok).", primary.voice_name)
+        else:
+            if engine_name != "piper":
+                log.warning("Bilinmeyen tts_engine '%s' — piper'a dusuluyor.", engine_name)
+            state.engine = _make_piper("tts_voice")
+            log.info("TTS hazir (Piper, %s).", state.engine.voice_name)
+        state.status = "hazir"
+    except Exception as e:  # noqa: BLE001 — TTS yuklenemese de sergi devam etsin
+        state.status = "hata"
+        state.error = str(e)
+        log.warning("TTS yuklenemedi: %s", e)
+
+
 def create_app(config: dict) -> Flask:
     app = Flask(__name__, static_folder=None)
 
     bridge = LLMBridge(config, BASE_DIR)
+    game = GameEngine(bridge=bridge)  # TKM deterministik; kelime turetme (ileride) LLM kullanir
+    # Flask threaded=True; tek GameEngine instance'i paylasiliyor. Sure-doldu ile
+    # manuel cevap/AI-turu ayni anda gelirse durum makinesi bozulmasin diye seri kilit.
+    game_lock = threading.Lock()
     gestures_path = (BASE_DIR / config["gestures_path"]).resolve()
     log_path = (BASE_DIR / config.get("session_log_path", "../logs/session.log")).resolve()
     logger = SessionLogger(log_path, config["ollama_url"], bridge.model)
@@ -115,6 +174,21 @@ def create_app(config: dict) -> Flask:
         threading.Thread(
             target=_load_whisper_async,
             args=(whisper_state, whisper_size),
+            daemon=True,
+        ).start()
+
+    # TTS motoru arka planda yuklensin — HTTP istekleri bunu beklemez.
+    from tts.cache import WavCache
+    tts_state = TTSState()
+    tts_cache = WavCache(
+        BASE_DIR / "tts" / "cache",
+        max_files=int(config.get("tts_cache_max", 500)),
+        enabled=bool(config.get("tts_cache_enabled", True)),
+    )
+    if config.get("tts_enabled", True):
+        threading.Thread(
+            target=_load_tts_async,
+            args=(tts_state, config),
             daemon=True,
         ).start()
 
@@ -230,6 +304,62 @@ def create_app(config: dict) -> Flask:
         logger.log_event("Konusma gecmisi sifirlandi")
         return jsonify({"ok": True})
 
+    # ——— Oyun modu (deterministik; TKM icin LLM cagrilmaz) ————————
+    @app.post("/api/game/start")
+    def api_game_start():
+        with game_lock:
+            result = game.start()
+        logger.log_event("Oyun baslatildi (menu)")
+        return jsonify(result)
+
+    @app.post("/api/game/input")
+    def api_game_input():
+        payload = request.get_json(silent=True) or {}
+        text = (payload.get("text") or "").strip()
+        timeout = bool(payload.get("timeout"))
+        if not text and not timeout:
+            return jsonify({"error": "metin bos"}), 400
+        # Sergi koruma: oyun girdileri kisa olmali
+        if len(text) > 60:
+            text = text[:60]
+        with game_lock:
+            result = game.handle(text, timeout=timeout)
+        if result.get("kind") == "round":
+            logger.log_event(
+                f"Oyun turu: kullanici={result.get('user_move')} ai={result.get('ai_move')} "
+                f"sonuc={result.get('outcome')} skor={result.get('score')} jest={result.get('jest_id')}"
+            )
+        elif result.get("game") == "kelime":
+            logger.log_event(
+                f"Kelime: kind={result.get('kind')} kullanici_kelime={result.get('user_word')} "
+                f"harf={result.get('required_letter')} outcome={result.get('outcome')} "
+                f"skor={result.get('score')}"
+            )
+        elif result.get("ended"):
+            logger.log_event("Oyundan cikildi")
+        return jsonify(result)
+
+    @app.post("/api/game/ai_turn")
+    def api_game_ai_turn():
+        """Kelime oyunu: sira AI'dayken AI'nin kelimesini/pes'ini uretir (LLM burada)."""
+        with game_lock:
+            result = game.ai_turn()
+        if result.get("ai_error"):
+            log.warning("Kelime AI turu: Ollama erisilemedi — gercek pes DEGIL (gorevli kontrol etsin)")
+            logger.log_event("UYARI: Kelime AI turunda Ollama erisilemedi (gercek pes degil)")
+        logger.log_event(
+            f"Kelime AI turu: kind={result.get('kind')} kelime={result.get('ai_word')} "
+            f"harf={result.get('required_letter')} outcome={result.get('outcome')}"
+        )
+        return jsonify(result)
+
+    @app.post("/api/game/exit")
+    def api_game_exit():
+        with game_lock:
+            result = game.exit()
+        logger.log_event("Oyun kapatildi")
+        return jsonify(result)
+
     @app.get("/api/transcribe/status")
     def api_transcribe_status():
         return jsonify({
@@ -290,6 +420,60 @@ def create_app(config: dict) -> Flask:
             text = text[:max_chars].rstrip() + "…"
             truncated = True
         return jsonify({"text": text, "meta": meta, "truncated": truncated})
+
+    @app.get("/api/speak/status")
+    def api_speak_status():
+        return jsonify({
+            "status": tts_state.status,
+            "ready": tts_state.is_ready(),
+            "error": tts_state.error,
+            "engine": config.get("tts_engine", "piper"),
+            "voice": config.get("tts_voice", "tr_TR-dfki-medium"),
+            "enabled": bool(config.get("tts_enabled", True)),
+            "autoplay": bool(config.get("tts_autoplay", True)),
+        })
+
+    @app.post("/api/speak")
+    def api_speak():
+        """Metin + jest_id + yogunluk -> duyguya gore tonlanmis WAV ses."""
+        if not config.get("tts_enabled", True):
+            return jsonify({"error": "tts_disabled"}), 503
+        payload = request.get_json(silent=True) or {}
+        text = (payload.get("text") or "").strip()
+        jest_id = (payload.get("jest_id") or "").strip() or None
+        try:
+            yogunluk = float(payload.get("yogunluk", 0.7))
+        except (TypeError, ValueError):
+            yogunluk = 0.7
+        if not text:
+            return jsonify({"error": "metin bos"}), 400
+        # Sergi koruma: asiri uzun metni kirp (CPU'yu kilitlemeyelim)
+        max_chars = int(config.get("max_user_input_chars", 240)) * 2
+        if len(text) > max_chars:
+            text = text[:max_chars]
+        if not tts_state.is_ready():
+            return jsonify({
+                "error": "tts_not_ready",
+                "status": tts_state.status,
+                "detail": tts_state.error,
+            }), 503
+
+        voice = config.get("tts_voice", "tr_TR-dfki-medium")
+        key = tts_cache.make_key(text, jest_id, yogunluk, voice)
+        audio = tts_cache.get(key)
+        if audio is None:
+            try:
+                with tts_state._lock:  # tek model -> seri sentez
+                    audio = tts_state.engine.synthesize(text, jest_id, yogunluk)
+            except Exception as e:  # noqa: BLE001
+                log.warning("TTS sentez hatasi: %s", e)
+                return jsonify({"error": "tts_failed", "detail": str(e)}), 500
+            if audio:
+                tts_cache.put(key, audio)
+        if not audio:
+            return jsonify({"error": "tts_empty"}), 500
+        return Response(audio, mimetype="audio/wav",
+                        headers={"Cache-Control": "no-store"})
 
     # CORS: sadece localhost; basit acik politika (tek bilgisayar)
     @app.after_request

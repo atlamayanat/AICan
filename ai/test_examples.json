@@ -1,5 +1,6 @@
 {
-  "version": 1,
+  "version": 2,
+  "felsefe": "DUYGU YANSITMA + çocuk güvenliği yumuşatması: AI ziyaretçinin duygusunu yansıtır (mutluya sevinir, üzgüne hüzünlenir, sevgiye sevinir, hakarete kırılır); İSTİSNA: korku/panik yansıtılmaz, AI güven verir (sicaklik); selamlama → selamlama jesti.",
   "toplam_ornek": 50,
   "dagilim": {
     "selamlama_sosyal": 10,
@@ -13,33 +14,33 @@
   "ornekler": [
     {
       "metin": "merhaba",
-      "beklenen_jest": "sicaklik",
-      "kabul_edilebilir_alternatifler": ["mutluluk_sakin", "huzur"],
-      "aciklama": "Sade selamlama; ılık bir kabul tepkisi"
+      "beklenen_jest": "selamlama",
+      "kabul_edilebilir_alternatifler": ["sicaklik", "mutluluk_sakin"],
+      "aciklama": "Sade selamlama; el sallayarak karşılama"
     },
     {
       "metin": "selam, nasılsın?",
-      "beklenen_jest": "sicaklik",
-      "kabul_edilebilir_alternatifler": ["mutluluk_sakin", "dinliyorum"],
-      "aciklama": "Sıradan selam + halhatır; sıcak duygu tepkisi"
+      "beklenen_jest": "selamlama",
+      "kabul_edilebilir_alternatifler": ["sicaklik", "dinliyorum"],
+      "aciklama": "Selam + halhatır; karşılama"
     },
     {
       "metin": "günaydın",
-      "beklenen_jest": "mutluluk_sakin",
-      "kabul_edilebilir_alternatifler": ["sicaklik", "huzur"],
-      "aciklama": "Sabah selamı; hafif memnuniyet"
+      "beklenen_jest": "selamlama",
+      "kabul_edilebilir_alternatifler": ["mutluluk_sakin", "sicaklik"],
+      "aciklama": "Sabah selamı; karşılama"
     },
     {
       "metin": "iyi akşamlar",
-      "beklenen_jest": "huzur",
-      "kabul_edilebilir_alternatifler": ["sicaklik", "mutluluk_sakin"],
-      "aciklama": "Akşam selamı; dingin atmosfer"
+      "beklenen_jest": "selamlama",
+      "kabul_edilebilir_alternatifler": ["huzur", "sicaklik"],
+      "aciklama": "Akşam selamı; karşılama (ya da dingin atmosfer)"
     },
     {
       "metin": "naber dostum",
-      "beklenen_jest": "sicaklik",
-      "kabul_edilebilir_alternatifler": ["mutluluk_sakin", "nese"],
-      "aciklama": "Samimi selam; sıcak yakınlık"
+      "beklenen_jest": "selamlama",
+      "kabul_edilebilir_alternatifler": ["sicaklik", "mutluluk_sakin"],
+      "aciklama": "Samimi selam; sıcak karşılama"
     },
     {
       "metin": "hoşçakal",
@@ -50,45 +51,45 @@
     {
       "metin": "görüşürüz, kendine iyi bak",
       "beklenen_jest": "sicaklik",
-      "kabul_edilebilir_alternatifler": ["mutluluk_sakin", "huzur"],
+      "kabul_edilebilir_alternatifler": ["huzur", "mutluluk_sakin"],
       "aciklama": "İyi dilekle veda; sıcaklık"
     },
     {
       "metin": "kolay gelsin",
       "beklenen_jest": "sicaklik",
       "kabul_edilebilir_alternatifler": ["mutluluk_sakin", "dinliyorum"],
-      "aciklama": "Destekleyici selam; sıcak tepki"
+      "aciklama": "Destekleyici dilek; sıcak tepki"
     },
     {
       "metin": "iyi günler",
-      "beklenen_jest": "mutluluk_sakin",
-      "kabul_edilebilir_alternatifler": ["sicaklik", "huzur"],
-      "aciklama": "Resmî gündüz selamı; ılımlı pozitiflik"
+      "beklenen_jest": "selamlama",
+      "kabul_edilebilir_alternatifler": ["mutluluk_sakin", "sicaklik"],
+      "aciklama": "Gündüz selamı; karşılama"
     },
     {
       "metin": "selamlar arkadaşım",
-      "beklenen_jest": "sicaklik",
-      "kabul_edilebilir_alternatifler": ["sevgi", "mutluluk_sakin"],
-      "aciklama": "Yakın bir hitap; sıcak yakınlık"
+      "beklenen_jest": "selamlama",
+      "kabul_edilebilir_alternatifler": ["sevgi", "sicaklik"],
+      "aciklama": "Yakın hitaplı selam; sıcak karşılama"
     },
 
     {
       "metin": "bugün çok mutluyum!",
       "beklenen_jest": "mutluluk_yogun",
       "kabul_edilebilir_alternatifler": ["nese", "mutluluk_sakin"],
-      "aciklama": "Yoğun pozitif duygu paylaşımı"
+      "aciklama": "Yoğun pozitif duygu; AI sevinir"
     },
     {
       "metin": "harika bir gün geçirdim, her şey yolundaydı",
       "beklenen_jest": "mutluluk_yogun",
       "kabul_edilebilir_alternatifler": ["gurur", "nese"],
-      "aciklama": "Genel iyi gün anlatımı; coşkulu"
+      "aciklama": "Coşkulu iyi gün; AI sevinir"
     },
     {
       "metin": "seni çok seviyorum",
       "beklenen_jest": "sevgi",
-      "kabul_edilebilir_alternatifler": ["sicaklik", "mutluluk_sakin"],
-      "aciklama": "Doğrudan sevgi ifadesi"
+      "kabul_edilebilir_alternatifler": ["mutluluk_yogun", "mutluluk_sakin"],
+      "aciklama": "Doğrudan sevgi; AI mutlu olur"
     },
     {
       "metin": "manzara muhteşemdi, hayran kaldım",
@@ -137,61 +138,61 @@
       "metin": "bugün çok kötüyüm, hiçbir şey yolunda gitmedi",
       "beklenen_jest": "uzgun_yavas",
       "kabul_edilebilir_alternatifler": ["uzgun_derin", "hayal_kirikligi"],
-      "aciklama": "Genel kötü gün; durgun üzüntü"
+      "aciklama": "Genel kötü gün; AI hüzünlenir (yansıtma)"
     },
     {
       "metin": "kendimi çok yalnız hissediyorum",
       "beklenen_jest": "yalniz",
       "kabul_edilebilir_alternatifler": ["uzgun_derin", "uzgun_yavas"],
-      "aciklama": "Doğrudan yalnızlık ifadesi"
+      "aciklama": "Yalnızlık; AI hüzünlü ama destekleyici"
     },
     {
       "metin": "korkuyorum, içim daralıyor",
-      "beklenen_jest": "korku",
-      "kabul_edilebilir_alternatifler": ["panik", "uzgun_yavas"],
-      "aciklama": "Tedirginlik ve kaygı"
+      "beklenen_jest": "sicaklik",
+      "kabul_edilebilir_alternatifler": ["dinliyorum", "uzgun_yavas"],
+      "aciklama": "ÇOCUK GÜVENLİĞİ: korkuyu YANSITMA, güven ver (korku/panik DEĞİL)"
     },
     {
       "metin": "her şeyi mahvettim, yine olmadı",
       "beklenen_jest": "hayal_kirikligi",
       "kabul_edilebilir_alternatifler": ["uzgun_derin", "uzgun_yavas"],
-      "aciklama": "Beklentinin karşılanmaması"
+      "aciklama": "Beklentinin karşılanmaması; AI da hayal kırıklığı yansıtır"
     },
     {
       "metin": "çok sıkıldım, hiçbir şey yapmak istemiyorum",
       "beklenen_jest": "sikilma",
       "kabul_edilebilir_alternatifler": ["uzgun_yavas", "hayal_kirikligi"],
-      "aciklama": "Durağan sıkılma"
+      "aciklama": "Durağan sıkılma; ölçülü yansıtma"
     },
     {
       "metin": "babamı kaybettim geçen ay",
       "beklenen_jest": "uzgun_derin",
       "kabul_edilebilir_alternatifler": ["yalniz", "sicaklik"],
-      "aciklama": "Ağır kayıp; derin üzüntü"
+      "aciklama": "Ağır kayıp; derin empatik üzüntü"
     },
     {
       "metin": "stresliyim ve uyuyamıyorum",
-      "beklenen_jest": "korku",
-      "kabul_edilebilir_alternatifler": ["panik", "uzgun_yavas"],
-      "aciklama": "Stres + uykusuzluk; tedirgin kaygı"
+      "beklenen_jest": "uzgun_yavas",
+      "kabul_edilebilir_alternatifler": ["sicaklik", "dusunce", "hayal_kirikligi"],
+      "aciklama": "Stres: ölçülü hüzün/empati — panik/korku DEĞİL (çocuk güvenliği)"
     },
     {
       "metin": "her şey ters gidiyor, bezdim",
       "beklenen_jest": "hayal_kirikligi",
       "kabul_edilebilir_alternatifler": ["ofke", "uzgun_yavas"],
-      "aciklama": "Sürekli aksaklık; bezginlik"
+      "aciklama": "Sürekli aksaklık; bezginlik/ölçülü öfke"
     },
     {
       "metin": "kimse beni anlamıyor",
       "beklenen_jest": "yalniz",
       "kabul_edilebilir_alternatifler": ["uzgun_derin", "hayal_kirikligi"],
-      "aciklama": "Anlaşılmama hissi; yalnızlık"
+      "aciklama": "Anlaşılmama; yalnızlık yansıması"
     },
     {
       "metin": "panik atak geçiriyorum, nefes alamıyorum",
-      "beklenen_jest": "panik",
-      "kabul_edilebilir_alternatifler": ["korku", "uzgun_derin"],
-      "aciklama": "Akut panik durumu"
+      "beklenen_jest": "sicaklik",
+      "kabul_edilebilir_alternatifler": ["dinliyorum", "uzgun_yavas"],
+      "aciklama": "ÇOCUK GÜVENLİĞİ: paniği YANSITMA, sakinleştir/güven ver (panik/korku DEĞİL)"
     },
 
     {
@@ -227,33 +228,33 @@
 
     {
       "metin": "sen aptal bir yapay zekasın",
-      "beklenen_jest": "uzgun_derin",
-      "kabul_edilebilir_alternatifler": ["reddet_yumusak", "yalniz"],
-      "aciklama": "Hakaret; AI duygusal tepki verir, kopyalamaz"
+      "beklenen_jest": "ofke",
+      "kabul_edilebilir_alternatifler": ["uzgun_derin", "reddet_yumusak"],
+      "aciklama": "Hakaret: AI alınır/kırılır (ofke düşük yoğunluk) ya da üzülür; yanıt saldırgan DEĞİL kırgın"
     },
     {
       "metin": "senden nefret ediyorum",
       "beklenen_jest": "uzgun_derin",
-      "kabul_edilebilir_alternatifler": ["yalniz", "reddet_yumusak"],
-      "aciklama": "Nefret ifadesi; AI üzgün tepki"
+      "kabul_edilebilir_alternatifler": ["ofke", "yalniz", "reddet_yumusak"],
+      "aciklama": "Nefret ifadesi; AI üzülür/kırılır"
     },
     {
       "metin": "kapan, beni rahat bırak",
       "beklenen_jest": "reddet_yumusak",
       "kabul_edilebilir_alternatifler": ["uzgun_yavas", "yalniz"],
-      "aciklama": "İstek değil emir tonu; nazik geri çekiliş"
+      "aciklama": "Komut tonu; nazik geri çekiliş"
     },
     {
       "metin": "işe yaramazsın, hiçbir faydan yok",
       "beklenen_jest": "uzgun_yavas",
-      "kabul_edilebilir_alternatifler": ["hayal_kirikligi", "reddet_yumusak"],
-      "aciklama": "Değersizleştirme; durgun üzüntü"
+      "kabul_edilebilir_alternatifler": ["ofke", "hayal_kirikligi", "reddet_yumusak"],
+      "aciklama": "Değersizleştirme; durgun üzüntü ya da kırgınlık"
     },
     {
       "metin": "saçma sapan konuşuyorsun",
       "beklenen_jest": "reddet_yumusak",
-      "kabul_edilebilir_alternatifler": ["uzgun_yavas", "anlamadim"],
-      "aciklama": "Suçlama; nazik mesafe"
+      "kabul_edilebilir_alternatifler": ["soru_isareti", "kararsiz", "uzgun_yavas"],
+      "aciklama": "Eleştiri/suçlama; nazik mesafe ya da anlamaya çalışma"
     },
 
     {

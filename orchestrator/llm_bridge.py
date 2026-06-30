@@ -1,5 +1,6 @@
-"""Ollama HTTP köprüsü — Qwen 2.5 7B'ye sistem promptu + kullanıcı metni gönderir,
-JSON formatında jest cevabını çözümler."""
+"""Ollama HTTP köprüsü — config'deki modele (ollama_model) sistem promptu + kullanıcı
+metni gönderir, format-schema ile JSON jest cevabını çözümler.
+Aktif model config.json'dan gelir; jest davranışı ai/system_prompt.txt ile belirlenir."""
 from __future__ import annotations
 
 import json
@@ -78,6 +79,18 @@ class LLMBridge:
         # Ollama default num_ctx=4096, sistem promptumuz ~5000 token + tarihce ile
         # kirpiliyor ve model tone/kural tablolarini goremiyor. 8192 rahat sigsin.
         self.num_ctx = int(config.get("num_ctx", 8192))
+        # Ornekleme parametreleri (config'ten ayarlanabilir). Varsayilanlar
+        # cesitlilik icindir: dusuk deterministiklik + frequency/presence penalty
+        # -> ornek cumleleri ezberleyip papaganlamayi azaltir.
+        self.temperature = float(config.get("llm_temperature", 0.75))
+        self.top_p = float(config.get("llm_top_p", 0.92))
+        self.repeat_penalty = float(config.get("llm_repeat_penalty", 1.15))
+        self.frequency_penalty = float(config.get("llm_frequency_penalty", 0.6))
+        self.presence_penalty = float(config.get("llm_presence_penalty", 0.3))
+        self.num_predict = int(config.get("llm_num_predict", 160))
+        # Sergi koruma: asiri uzun girdi prompt'u sisirip timeout/donma yapmasin.
+        # web_server zaten 413 ile reddeder; bu, Tkinter (main.py) yolunu da korur.
+        self.max_user_input_chars = int(config.get("max_user_input_chars", 240))
 
         prompt_path = (base_dir / config["system_prompt_path"]).resolve()
         gestures_path = (base_dir / config["gestures_path"]).resolve()
@@ -258,6 +271,9 @@ class LLMBridge:
     def request(self, user_text: str) -> Optional[dict]:
         """Başarılı: {jest_id, yogunluk, yanit, meta}. Başarısız: {error: ..., meta?}"""
         t0 = time.monotonic()
+        # Asiri uzun girdiyi kirp (her iki giris yolunu da korur).
+        if self.max_user_input_chars > 0 and len(user_text) > self.max_user_input_chars:
+            user_text = user_text[: self.max_user_input_chars]
         # Baked modda sistem promptu modele gömülü olduğundan tekrar göndermeyiz —
         # bu ~2300 token prompt eval süresi tasarrufu sağlar.
         messages: list[dict] = []
@@ -282,11 +298,18 @@ class LLMBridge:
                     # (qwen2.5, gemma3) bu alani gormez.
                     "think": False,
                     "options": {
-                        "temperature": 0.2,
-                        "top_p": 0.9,
+                        # jest_id format-schema enum'la kilitli oldugu icin sicaklik
+                        # artirmak JSON'u BOZMAZ, sadece "yanit" metnini cesitlendirir.
+                        # frequency/presence penalty ornek cumlelerin ezberlenip
+                        # papaganlanmasini kirar (config'ten ayarlanir).
+                        "temperature": self.temperature,
+                        "top_p": self.top_p,
                         "num_ctx": self.num_ctx,
-                        "num_predict": 120,
-                        "repeat_penalty": 1.15,
+                        "num_predict": self.num_predict,
+                        # 1.3 Turkce'yi bozuyor (kelime atlama); 1.15 dengeli.
+                        "repeat_penalty": self.repeat_penalty,
+                        "frequency_penalty": self.frequency_penalty,
+                        "presence_penalty": self.presence_penalty,
                     },
                 },
                 timeout=self.timeout,

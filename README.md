@@ -2,10 +2,10 @@
 
 Konya Bilim Merkezi sergi ünitesi için yapay zekâ tabanlı ifade prototipi.
 
-**Akış:** ziyaretçi metin yazar → yerel AI (Gemma 3 4B) bir jest seçer → ekrandaki **32×32 yazılım LED matrisi** o jestin animasyonunu oynatır → kullanıcı **Durdur**'a basana kadar devam eder. Tüm oturum istatistikleri bir log dosyasına kaydedilir.
+**Akış:** ziyaretçi metin yazar → yerel AI (Gemma 3 4B) bir jest seçer → ekrandaki **96×96 yazılım LED matrisi** o jestin animasyonunu oynatır → kullanıcı **Durdur**'a basana kadar devam eder. Tüm oturum istatistikleri bir log dosyasına kaydedilir.
 
 ```
-[Tkinter giriş]  →  [Ollama / Gemma 3 4B]  →  [32×32 yazılım matrisi]
+[Tkinter giriş]  →  [Ollama / Gemma 3 4B]  →  [96×96 yazılım matrisi]
      metin             jest seçimi              ışık animasyonu
                           ↓
                     [logs/session.log]
@@ -156,7 +156,7 @@ yap, yeniden başlat. Her istek ~2-3 sn daha hızlı olur.
 │                          │  Durum                              │
 │  ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓        │    Ollama: ✓                        │
 │  ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓        │    Aktif jest: sicaklik             │
-│  ▓▓ 32×32 matris ▓▓      │    AI yanıtı: "Merhaba..."          │
+│  ▓▓ 96×96 matris ▓▓      │    AI yanıtı: "Merhaba..."          │
 │  ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓        ├─────────────────────────────────────┤
 │  ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓        │  Son komut                          │
 │  ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓        │    jest_id, yoğunluk, süre          │
@@ -210,7 +210,7 @@ AICAN/
 │   ├── main.py               ← Tkinter UI + ana akış
 │   ├── llm_bridge.py         ← Ollama HTTP köprüsü
 │   ├── gesture_engine.py     ← 36 desen + jest dispatcher
-│   ├── matrix_sim.py         ← Tkinter Canvas tabanlı 32×32 görüntüleyici
+│   ├── matrix_sim.py         ← Tkinter Canvas tabanlı 96×96 görüntüleyici
 │   ├── session_logger.py     ← Detaylı oturum logu
 │   ├── stats.py              ← RAM / token istatistikleri (psutil)
 │   ├── build_model.py        ← Modelfile üretici

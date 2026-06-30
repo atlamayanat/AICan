@@ -510,6 +510,114 @@
   .test-item .name { color: var(--ink-0); }
   .test-item .pat { color: var(--ink-2); font-size: 9px; }
 
+  /* ——— Oyun skor HUD ————————————————————————————————— */
+  .game-hud {
+    position: absolute;
+    top: 92px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 6;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 12px 32px;
+    background: oklch(0.14 0.08 290 / 0.55);
+    border: 1px solid oklch(0.82 0.16 75 / 0.40);
+    border-radius: 999px;
+    backdrop-filter: blur(10px);
+    font-family: 'JetBrains Mono', monospace;
+    box-shadow: 0 0 28px oklch(0.82 0.16 75 / 0.22);
+  }
+  .game-hud.hidden { display: none; }
+  .game-hud .ghud-lbl {
+    font-size: 13px;
+    letter-spacing: 0.34em;
+    color: var(--ink-2);
+  }
+  .game-hud .ghud-num {
+    font-size: 30px;
+    font-weight: 600;
+    color: oklch(0.86 0.16 80);
+    min-width: 22px;
+    text-align: center;
+  }
+  .game-hud .ghud-sep { color: oklch(0.45 0.05 270); font-size: 22px; }
+
+  /* ——— Sarı kazanç ışığı (AI tur kazandığında) ————————————— */
+  /* Figürün arkasında (z-index 2, .main=3) sıcak bir altın patlaması;
+     bir kez parlar ve söner. --gesture-glow zaten sarıya kaydığı için
+     sahne zemini de o an sıcaklaşır. */
+  #win-flash {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    pointer-events: none;
+    opacity: 0;
+    background:
+      radial-gradient(ellipse 90% 70% at 50% 46%, rgba(255, 212, 95, 0.55), transparent 62%),
+      radial-gradient(ellipse 130% 100% at 50% 50%, rgba(255, 165, 50, 0.28), transparent 76%);
+  }
+  #win-flash.on { animation: winFlash 1.5s ease-out forwards; }
+  @keyframes winFlash {
+    0%   { opacity: 0; }
+    16%  { opacity: 1; }
+    100% { opacity: 0; }
+  }
+
+  /* AI "bir daha oynayalım" diye ısrar ederken metin hafifçe nabız atar */
+  #ai-text.insist { animation: insistPulse 0.8s ease-in-out 3; }
+  @keyframes insistPulse {
+    0%, 100% { text-shadow: none; }
+    50%      { text-shadow: 0 0 22px rgba(255, 205, 95, 0.65); }
+  }
+
+  /* ——— Kelime oyunu zaman barı (üst bantta, ekranı kapatmaz) ——— */
+  .word-timer {
+    position: absolute;
+    top: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 7;
+    width: 460px;
+    max-width: 60vw;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 9px 20px;
+    background: oklch(0.14 0.06 285 / 0.55);
+    border: 1px solid var(--hairline);
+    border-radius: 14px;
+    backdrop-filter: blur(10px);
+  }
+  .word-timer.hidden { display: none; }
+  .word-timer .wt-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .word-timer .wt-label { font-size: 13px; letter-spacing: 0.2em; color: var(--ink-1); }
+  .word-timer.ai .wt-label { color: var(--neon-cyan); }
+  .word-timer .wt-num { font-size: 20px; font-weight: 600; color: var(--neon-cyan); }
+  .word-timer .wt-track {
+    height: 10px;
+    border-radius: 6px;
+    overflow: hidden;
+    background: oklch(0.24 0.04 270 / 0.7);
+  }
+  .word-timer .wt-fill {
+    height: 100%;
+    width: 100%;
+    border-radius: 8px;
+    background: linear-gradient(90deg, var(--neon-cyan), var(--neon-violet));
+    box-shadow: 0 0 16px rgba(110, 230, 255, 0.4);
+    transition: width 0.12s linear;
+  }
+  .word-timer .wt-fill.low {
+    background: linear-gradient(90deg, #ff8a3c, #ff3b3b);
+    box-shadow: 0 0 18px rgba(255, 80, 80, 0.5);
+  }
+
   @media (max-width: 1920px), (max-height: 1080px) {
     body { display: grid; }
     #stage {
@@ -531,6 +639,18 @@
       </div>
       <div class="top-right">Konya Bilim Merkezi</div>
     </header>
+
+    <!-- Oyun skor HUD (gizli — oyun modunda görünür) -->
+    <div id="game-hud" class="game-hud hidden"></div>
+
+    <!-- Sarı kazanç ışığı — AI tur kazandığında bir kez parlar (figürün arkasında) -->
+    <div id="win-flash"></div>
+
+    <!-- Kelime oyunu zaman barı (gizli — kelime oyununda görünür) -->
+    <div id="word-timer" class="word-timer hidden">
+      <div class="wt-head"><span class="wt-label">SENİN SIRAN</span><span class="wt-num">20 sn</span></div>
+      <div class="wt-track"><div class="wt-fill"></div></div>
+    </div>
 
     <!-- Ana yerleşim -->
     <main class="main">

@@ -38,3 +38,13 @@ Thumbs.db
 # Emoji onizleme/debug dosyalari (runtime'da kullanilmiyor, prepare_emojis.py uretir)
 assets/emojis/**/preview.gif
 assets/emojis/**/preview_zoom.gif
+
+# Seslendirme (TTS)
+# NOT: .gitignore satir-ici yorumu desteklemez; aciklamalar kendi satirinda.
+# uretilen ses onbellegi (runtime)
+orchestrator/tts/cache/
+# 60MB ses modeli — README'deki komutla indirilir
+orchestrator/tts/voices/*.onnx
+orchestrator/tts/voices/*.onnx.json
+# kalite testi ciktilari
+seslendirme_demo/
