@@ -611,6 +611,7 @@
     if (!p) return;
     gamePhase = (p.phase && p.phase !== 'idle') ? p.phase : null;
     const isWord = (p.game === 'kelime');
+    const isTimed = (p.game === 'kelime' || p.game === 'esanlam');
 
     // Sergi ekranında kullanıcı hamlesinin typewriter'ı bitsin diye kısa bekle
     // (aynı anda ai-text yazılırsa user-text kesilir) — ayrıca "düşünme" hissi verir.
@@ -643,6 +644,9 @@
       const adlar = { edebiyat: 'Edebiyat', tarih: 'Tarih', bilim: 'Bilim', genel: 'Genel' };
       els.gameTheme.textContent = p.category ? ('Tema: ' + (adlar[p.category] || p.category)) : '';
     }
+    if (p.game === 'esanlam' && els.gameScore) {
+      els.gameScore.textContent = p.ea_progress || '—';
+    }
 
     if (p.kind === 'round') {
       log('jest', 'oyun: ' + p.outcome + ' → ' + p.jest_id
@@ -652,6 +656,9 @@
       log('jest', 'kelime: ' + p.kind
         + (p.required_letter ? " → '" + p.required_letter + "'" : '')
         + (p.outcome ? ' | ' + p.outcome : ''));
+    } else if (p.game === 'esanlam') {
+      log('jest', 'eş/zıt: ' + p.kind
+        + (p.dogru_mu === true ? ' ✓' : p.dogru_mu === false ? ' ✗' : ''));
     } else {
       log('sys', 'oyun: ' + p.kind);
     }
@@ -661,17 +668,16 @@
     }
 
     // ——— Kelime oyunu: zaman barı + otomatik AI turu ———
-    if (isWord) {
+    if (isTimed) {
       if (p.ended || !p.timer) stopWordTimer();
       else startWordTimer(p.timer.seconds, p.timer.who);
-      // Sıra AI'da ise (kullanıcı kelimesi kabul edildi) AI'nın cevabını iste.
-      if (!p.ended && p.turn === 'ai') requestAiTurn();
+      // Yalniz kelime modunda AI turu otomatik istenir (esanlam tek yonlu).
+      if (p.game === 'kelime' && !p.ended && p.turn === 'ai') requestAiTurn();
     }
 
     if (p.ended) {
-      if (isWord) {
-        // Kelime maçı bitti: timer dur, "Yeni oyun/Çıkış" butonları + skor kalır.
-        // gamePhase üstte 'kelime' kaldı (p.phase==='kelime') → tekrar oynanabilir.
+      if (isTimed) {
+        // Kelime/Eş-Zıt maçı bitti: timer dur, "Yeni oyun/Çıkış" + skor kalır.
         stopWordTimer();
       } else {
         gamePhase = null;

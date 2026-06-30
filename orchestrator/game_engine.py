@@ -126,7 +126,7 @@ _TXT = {
         "İkimiz de aynı yoldayız bugün, berabere.",
     ],
     "menu": [
-        "Hadi oynayalım! Hangisini istersin? — (1) Taş Kağıt Makas, (2) Kelime Türetme. Söyle ya da dokun.",
+        "Hadi oynayalım! Hangisini istersin? — (1) Taş Kağıt Makas, (2) Kelime Türetme, (3) Eş/Zıt Anlam. Söyle ya da dokun.",
     ],
     "rps_start": [
         "Taş Kağıt Makas! Hazırsan başla — taş, kağıt ya da makas de. Ben de seçeceğim…",
@@ -255,6 +255,47 @@ def _load_word_categories(path):
         log.warning("word_categories.json okunamadi: %s — yalniz 'genel' kullanilacak", e)
         return {}
 
+
+# ——— Es/Zit Anlam verisi (dostca quiz; AI sorar, kullanici cevaplar) ————
+_EA_DEFAULT_PATH = Path(__file__).resolve().parent.parent / "ai" / "es_zit_anlam.json"
+
+# JSON okunamazsa mod calismaya devam etsin diye kucuk gomulu yedek.
+_EA_FALLBACK = {
+    "siyah": {"zit": ["beyaz", "ak"]},
+    "büyük": {"zit": ["küçük"], "es": ["iri", "kocaman"]},
+    "mutlu": {"zit": ["üzgün", "mutsuz"], "es": ["sevinçli", "neşeli"]},
+    "hızlı": {"zit": ["yavaş"], "es": ["çabuk"]},
+    "uzun": {"zit": ["kısa"]},
+    "sıcak": {"zit": ["soğuk"]},
+    "açık": {"zit": ["kapalı"]},
+    "yeni": {"zit": ["eski"]},
+    "güzel": {"zit": ["çirkin"], "es": ["hoş"]},
+    "iyi": {"zit": ["kötü"]},
+}
+
+
+def _load_es_zit(path):
+    """es_zit_anlam.json yukle: {kelime: {"es":[...], "zit":[...]}}.
+    Hata -> {} (cagiran gomulu yedege duser)."""
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+        out = {}
+        for k, v in data.items():
+            if not isinstance(v, dict):
+                continue
+            entry = {}
+            for tip in ("es", "zit"):
+                vals = [temiz_kelime(w) for w in v.get(tip, []) if temiz_kelime(w)]
+                if vals:
+                    entry[tip] = vals
+            kk = temiz_kelime(k)
+            if kk and entry:
+                out[kk] = entry
+        return out
+    except (OSError, json.JSONDecodeError, ValueError) as e:
+        log.warning("es_zit_anlam.json okunamadi: %s — gomulu yedek kullanilacak", e)
+        return {}
+
 # Kelime fazında yalnızca NET komutlar çıkıştır ("son", "bitti" gerçek kelime olabilir).
 _KEL_EXIT = {"cikis", "cik", "dur", "durdur", "kapat", "iptal", "vazgec", "vazgectim"}
 
@@ -335,8 +376,10 @@ class GameEngine:
     WORD_AI_BASE = 0.95        # baslangic basari olasiligi
     WORD_AI_DECAY = 0.30       # grace sonrasi her turda dusus
     WORD_AI_FLOOR = 0.05       # taban (AI ~4-5. cevapta yenilir)
+    EA_QUESTION_COUNT = 5      # es/zit anlam: soru sayisi
 
-    def __init__(self, bridge=None, word_llm=None, categories=None, categories_path=None):
+    def __init__(self, bridge=None, word_llm=None, categories=None, categories_path=None,
+                 ea_data=None, ea_path=None):
         # bridge: LLMBridge (kelime oyunu Ollama bilgisini buradan alir)
         self.bridge = bridge
         self._word_llm = word_llm   # WordLLM benzeri; None ise bridge'den lazy kurulur
@@ -356,7 +399,18 @@ class GameEngine:
         for ws in cats.values():
             self._all_words.update(temiz_kelime(w) for w in ws)
         self.word_category = None   # _reset_word'te SIFIRLANMAZ (bkz. plan notu)
+        # Es/Zit Anlam verisi + normalize-li kabul kumeleri
+        ea_src = ea_data if ea_data is not None else _load_es_zit(ea_path or _EA_DEFAULT_PATH)
+        if not ea_src:
+            ea_src = {temiz_kelime(k): v for k, v in _EA_FALLBACK.items()}
+        self._ea_data = ea_src
+        self._ea_norm = {
+            w: {tip: {normalize(x) for x in vals} for tip, vals in entry.items()}
+            for w, entry in self._ea_data.items()
+        }
+        self._ea_words = [w for w, e in self._ea_data.items() if e]
         self._reset_word()
+        self._reset_ea()
 
     # ——— Kelime oyunu icin LLM (lazy; testte enjekte edilebilir) ————
     @property
@@ -380,6 +434,13 @@ class GameEngine:
         self.word_score = {"ai": 0, "user": 0}
         self.word_starter = None
 
+    def _reset_ea(self) -> None:
+        self.ea_turn = None              # "hazir" | "soru" | None
+        self.ea_used = set()
+        self.ea_score = {"dogru": 0, "toplam": 0}
+        self.ea_q_index = 0
+        self.ea_current = None
+
     # ——— Genel durum sifirla ————————————————————————————————
     def _reset_scores(self) -> None:
         self.score = {"ai": 0, "user": 0, "draw": 0}
@@ -392,6 +453,7 @@ class GameEngine:
         return [
             {"key": "1", "label": "✊ Taş Kağıt Makas"},
             {"key": "2", "label": "🔤 Kelime Türetme"},
+            {"key": "3", "label": "🔁 Eş/Zıt Anlam"},
         ]
 
     @staticmethod
@@ -426,6 +488,7 @@ class GameEngine:
         """Oyundan cik, sohbet moduna don."""
         self.phase = "idle"
         self._reset_word()
+        self._reset_ea()
         return {
             "phase": "idle",
             "kind": "exit",
@@ -450,7 +513,9 @@ class GameEngine:
         # Cikis: kelime turunda yalnizca NET komutlar ("son"/"bitti" gercek kelime olabilir),
         # diger fazlarda genis kelime kumesi gecerli. Timeout sinyalinde cikis kontrolu yok.
         if not timeout:
-            if self.phase == "kelime" and self.word_turn is not None:
+            active_game = ((self.phase == "kelime" and self.word_turn is not None) or
+                           (self.phase == "esanlam" and self.ea_turn is not None))
+            if active_game:
                 if n in _KEL_EXIT:
                     return self.exit()
             elif n in _EXIT_WORDS or any(w in _EXIT_WORDS for w in n.split()):
@@ -471,6 +536,12 @@ class GameEngine:
                 return self._handle_kelime_ready(text)
             # Kelime eslestirmesi Turkce harfleri korur (normalize degil, ham metin)
             return self._handle_kelime(text, timeout)
+        if self.phase == "esanlam":
+            if self.ea_turn is None:
+                return self._start_esanlam()   # bitti -> yeni oyun
+            if self.ea_turn == "hazir":
+                return self._handle_esanlam_ready(text)
+            return self._handle_esanlam(text, timeout)
         # idle iken girdi gelirse menuyu ac
         return self.start()
 
@@ -484,6 +555,9 @@ class GameEngine:
                     "tas", "kagit", "makas")
         if n in rps_keys or "tas kagit" in n or "kagit makas" in n:
             return self._start_rps()
+        # Es/Zit Anlam
+        if n in ("3", "uc", "ucuncu") or "anlam" in n:
+            return self._start_esanlam()
         # Anlasilmadi
         return {
             "phase": "menu",
@@ -907,6 +981,144 @@ class GameEngine:
         )
         payload["ai_error"] = ai_error  # True ise: gercek pes degil, Ollama erisilemedi
         return payload
+
+    # ——— Es/Zit Anlam (dostca puanli quiz) ————————————————————
+    def _ea_next_question(self):
+        """Kullanilmamis rastgele kelime + o kelimede mevcut rastgele tip sec.
+        Tukenince None. ea_current'i de gunceller."""
+        adaylar = [w for w in self._ea_words if w not in self.ea_used]
+        if not adaylar:
+            return None
+        kelime = random.choice(adaylar)
+        tipler = [t for t in ("es", "zit") if self._ea_data[kelime].get(t)]
+        tip = random.choice(tipler)
+        self.ea_used.add(kelime)
+        self.ea_current = {
+            "kelime": kelime,
+            "tip": tip,
+            "kabul_norm": self._ea_norm[kelime][tip],
+            "kabul_goster": self._ea_data[kelime][tip],
+        }
+        return self.ea_current
+
+    def _ea_check_answer(self, text: str) -> bool:
+        """Kullanici cevabi (normalize) mevcut sorunun kabul kumesinde mi? (lenient)."""
+        cur = self.ea_current
+        if not cur:
+            return False
+        un = normalize(text)
+        if not un:
+            return False
+        cand = {un} | set(un.split())
+        return bool(cur["kabul_norm"] & cand)
+
+    def _ea_payload(self, kind, *, turn, jest_id, yanit, yogunluk=0.8,
+                    ea_progress=None, dogru_mu=None, timer=None, ended=False, buttons=None):
+        return {
+            "game": "esanlam",
+            "phase": self.phase,
+            "kind": kind,
+            "turn": turn,
+            "jest_id": jest_id,
+            "yogunluk": yogunluk,
+            "yanit": yanit,
+            "score": None,                 # quiz ilerlemesi ea_progress'te
+            "ea_progress": ea_progress,
+            "dogru_mu": dogru_mu,
+            "timer": timer,
+            "buttons": buttons if buttons is not None else [{"key": "cikis", "label": "Çıkış"}],
+            "ended": ended,
+            "outcome": None,
+        }
+
+    @staticmethod
+    def _ea_ready_buttons():
+        return [{"key": "basla", "label": "▶ Başla"},
+                {"key": "cikis", "label": "Çıkış"}]
+
+    def _start_esanlam(self) -> dict:
+        """Kurallari anlat + 'basla' bekle (henuz soru/sure yok)."""
+        self.phase = "esanlam"
+        self._reset_ea()
+        self.ea_turn = "hazir"
+        yanit = (
+            "Eş/Zıt Anlam oyunu! Sana kelimeler söyleyeceğim; her birinin EŞ ya da ZIT "
+            f"anlamlısını bul. {self.EA_QUESTION_COUNT} soru, doğrularını sayacağım. "
+            "Hazırsan başlayalım — 'başla' de ya da butona dokun!"
+        )
+        return self._ea_payload(
+            "ea_ready", turn="hazir", jest_id=random.choice(_JEST["kel_intro"]),
+            yanit=yanit, yogunluk=0.8, timer=None, buttons=self._ea_ready_buttons())
+
+    def _handle_esanlam_ready(self, text: str) -> dict:
+        n = normalize(text)
+        if n in _KEL_READY or any(w in _KEL_READY for w in n.split()):
+            return self._begin_esanlam()
+        return self._ea_payload(
+            "ea_ready", turn="hazir", jest_id="bekle",
+            yanit="Hazır olunca 'başla' de ya da butona dokun :)", yogunluk=0.6,
+            timer=None, buttons=self._ea_ready_buttons())
+
+    def _begin_esanlam(self) -> dict:
+        self.ea_used = set()
+        self.ea_score = {"dogru": 0, "toplam": 0}
+        self.ea_q_index = 0
+        return self._ea_ask_next()
+
+    def _ea_ask_next(self, prefix=None, dogru_mu=None) -> dict:
+        """Sonraki soruyu sor; soru kalmadi/sayi doldu -> bitir.
+        prefix: bir onceki cevabin geri bildirimi (ayni mesaja eklenir)."""
+        if self.ea_q_index >= self.EA_QUESTION_COUNT:
+            return self._ea_end(prefix=prefix)
+        q = self._ea_next_question()
+        if q is None:
+            return self._ea_end(prefix=prefix)
+        self.ea_q_index += 1
+        self.ea_turn = "soru"
+        tip_ad = "eş" if q["tip"] == "es" else "zıt"
+        soru = f"'{_cap(q['kelime'])}' kelimesinin {tip_ad} anlamlısı ne?"
+        yanit = f"{prefix} {soru}" if prefix else soru
+        if dogru_mu is True:
+            jest = random.choice(_JEST["kel_user_ok"])
+        elif dogru_mu is False:
+            jest = random.choice(_JEST["kel_retry"])
+        else:
+            jest = random.choice(_JEST["kel_intro"])
+        return self._ea_payload(
+            "ea_question", turn="soru", jest_id=jest, yanit=yanit, yogunluk=0.85,
+            dogru_mu=dogru_mu,
+            ea_progress=f"Soru {self.ea_q_index}/{self.EA_QUESTION_COUNT} · Doğru {self.ea_score['dogru']}",
+            timer={"seconds": self.USER_TURN_SECONDS, "who": "user"})
+
+    def _handle_esanlam(self, text: str, timeout: bool) -> dict:
+        cur = self.ea_current
+        beklenen = cur["kabul_goster"][0] if cur else "?"
+        self.ea_score["toplam"] += 1
+        if not timeout and self._ea_check_answer(text):
+            self.ea_score["dogru"] += 1
+            geri = random.choice(_TXT["kel_user_ok"]) + f" '{_cap(beklenen)}' doğru."
+            dogru = True
+        else:
+            geri = (f"Süre doldu! Ben '{_cap(beklenen)}' diyecektim."
+                    if timeout else f"Yaklaştın! Ben '{_cap(beklenen)}' diyecektim 😊")
+            dogru = False
+        return self._ea_ask_next(prefix=geri, dogru_mu=dogru)
+
+    def _ea_end(self, prefix=None) -> dict:
+        self.ea_turn = None
+        d = self.ea_score["dogru"]
+        t = self.ea_score["toplam"] or self.EA_QUESTION_COUNT
+        if d >= t * 0.8:
+            jest = random.choice(_JEST["kel_user_ok"]); kapanis = "Harikasın, kelime hazinen çok geniş!"
+        elif d >= t * 0.4:
+            jest = random.choice(_JEST["kel_intro"]); kapanis = "İyi gidiyorsun, güzel oynadın!"
+        else:
+            jest = "huzur"; kapanis = "Önemli değil, oynamak güzeldi — yine beklerim!"
+        yanit = f"{prefix + ' ' if prefix else ''}Oyun bitti! {d}/{t} doğru. {kapanis}"
+        return self._ea_payload(
+            "ea_end", turn=None, jest_id=jest, yanit=yanit, yogunluk=0.9,
+            ea_progress=f"Bitti · {d}/{t} doğru", timer=None, ended=True,
+            buttons=[{"key": "esanlam", "label": "🔁 Yeni oyun"}, {"key": "cikis", "label": "Çıkış"}])
 
     # ——— Durum ————————————————————————————————————————————
     def status(self) -> dict:
