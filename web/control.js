@@ -611,7 +611,7 @@
     if (!p) return;
     gamePhase = (p.phase && p.phase !== 'idle') ? p.phase : null;
     const isWord = (p.game === 'kelime');
-    const isTimed = (p.game === 'kelime' || p.game === 'esanlam');
+    const isTimed = (p.game === 'kelime' || p.game === 'quiz');
 
     // Sergi ekranında kullanıcı hamlesinin typewriter'ı bitsin diye kısa bekle
     // (aynı anda ai-text yazılırsa user-text kesilir) — ayrıca "düşünme" hissi verir.
@@ -644,8 +644,8 @@
       const adlar = { edebiyat: 'Edebiyat', tarih: 'Tarih', bilim: 'Bilim', genel: 'Genel' };
       els.gameTheme.textContent = p.category ? ('Tema: ' + (adlar[p.category] || p.category)) : '';
     }
-    if (p.game === 'esanlam' && els.gameScore) {
-      els.gameScore.textContent = p.ea_progress || '—';
+    if (p.game === 'quiz' && els.gameScore) {
+      els.gameScore.textContent = p.quiz_progress || '—';
     }
 
     if (p.kind === 'round') {
@@ -656,8 +656,8 @@
       log('jest', 'kelime: ' + p.kind
         + (p.required_letter ? " → '" + p.required_letter + "'" : '')
         + (p.outcome ? ' | ' + p.outcome : ''));
-    } else if (p.game === 'esanlam') {
-      log('jest', 'eş/zıt: ' + p.kind
+    } else if (p.game === 'quiz') {
+      log('jest', 'bilgi: ' + p.kind
         + (p.dogru_mu === true ? ' ✓' : p.dogru_mu === false ? ' ✗' : ''));
     } else {
       log('sys', 'oyun: ' + p.kind);

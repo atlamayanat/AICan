@@ -126,7 +126,7 @@ _TXT = {
         "İkimiz de aynı yoldayız bugün, berabere.",
     ],
     "menu": [
-        "Hadi oynayalım! Hangisini istersin? — (1) Taş Kağıt Makas, (2) Kelime Türetme, (3) Eş/Zıt Anlam. Söyle ya da dokun.",
+        "Hadi oynayalım! Hangisini istersin? — (1) Taş Kağıt Makas, (2) Kelime Türetme, (3) Bilgi Yarışması. Söyle ya da dokun.",
     ],
     "rps_start": [
         "Taş Kağıt Makas! Hazırsan başla — taş, kağıt ya da makas de. Ben de seçeceğim…",
@@ -296,12 +296,140 @@ def _load_es_zit(path):
         log.warning("es_zit_anlam.json okunamadi: %s — gomulu yedek kullanilacak", e)
         return {}
 
+
+_ATASOZU_PATH = Path(__file__).resolve().parent.parent / "ai" / "atasozu.json"
+_DY_PATH = Path(__file__).resolve().parent.parent / "ai" / "dogru_yanlis.json"
+_ATASOZU_FALLBACK = [
+    {"bas": "Damlaya damlaya", "tamam": ["göl olur"]},
+    {"bas": "Sakla samanı", "tamam": ["gelir zamanı"]},
+    {"bas": "Bir elin nesi var", "tamam": ["iki elin sesi var"]},
+    {"bas": "Ağaç yaşken", "tamam": ["eğilir"]},
+    {"bas": "Son pişmanlık", "tamam": ["fayda etmez"]},
+]
+_DY_FALLBACK = [
+    {"ifade": "Dünya, Güneş'in etrafında döner", "dogru": True, "aciklama": "Bir yılda döner."},
+    {"ifade": "Güneş bir gezegendir", "dogru": False, "aciklama": "Güneş bir yıldızdır."},
+    {"ifade": "Su 100 derecede kaynar", "dogru": True, "aciklama": "Deniz seviyesinde."},
+    {"ifade": "Penguenler kuzey kutbunda yaşar", "dogru": False, "aciklama": "Güneyde yaşarlar."},
+    {"ifade": "Buz suyun üstünde yüzer", "dogru": True, "aciklama": "Buz sudan hafiftir."},
+]
+
+
+def _load_json_list(path):
+    """JSON dizi dosyasi yukle; hata/uyumsuz -> [] (cagiran gomulu yedege duser)."""
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+        return data if isinstance(data, list) else []
+    except (OSError, json.JSONDecodeError, ValueError) as e:
+        log.warning("%s okunamadi: %s — gomulu yedek", path, e)
+        return []
+
+
+# ——— Quiz saglayicilar — her biri tekduze soru dict uretir ————
+# Soru dict: {"id", "prompt", "accept_norm": set, "reveal": str, "match": "token"|"substring"}
+class _Provider:
+    key = ""
+    label = ""
+
+    def intro(self, n):
+        return ""
+
+    def next_question(self, used):
+        return None
+
+
+class _EsZitProvider(_Provider):
+    key = "eszit"
+    label = "Eş/Zıt Anlam"
+
+    def __init__(self, data):
+        self.data = data
+        self.norm = {w: {t: {normalize(x) for x in v} for t, v in e.items()}
+                     for w, e in data.items()}
+        self.words = [w for w, e in data.items() if e]
+
+    def intro(self, n):
+        return (f"Eş/Zıt Anlam! Sana kelimeler söyleyeceğim; her birinin EŞ ya da ZIT "
+                f"anlamlısını bul. {n} soru, doğrularını sayacağım.")
+
+    def next_question(self, used):
+        adaylar = [w for w in self.words if w not in used]
+        if not adaylar:
+            return None
+        kelime = random.choice(adaylar)
+        tip = random.choice([t for t in ("es", "zit") if self.data[kelime].get(t)])
+        tip_ad = "eş" if tip == "es" else "zıt"
+        return {"id": kelime,
+                "prompt": f"'{_cap(kelime)}' kelimesinin {tip_ad} anlamlısı ne?",
+                "accept_norm": self.norm[kelime][tip],
+                "reveal": _cap(self.data[kelime][tip][0]),
+                "match": "token"}
+
+
+class _AtasozuProvider(_Provider):
+    key = "atasozu"
+    label = "Atasözü Tamamlama"
+
+    def __init__(self, items):
+        self.items = [it for it in items
+                      if isinstance(it, dict) and it.get("bas") and it.get("tamam")]
+
+    def intro(self, n):
+        return (f"Atasözü Tamamlama! Atasözünün başını söyleyeceğim, sen devamını getir. "
+                f"{n} soru, doğrularını sayacağım.")
+
+    def next_question(self, used):
+        adaylar = [it for it in self.items if it["bas"] not in used]
+        if not adaylar:
+            return None
+        it = random.choice(adaylar)
+        return {"id": it["bas"],
+                "prompt": f"'{it['bas']} …' nasıl devam eder?",
+                "accept_norm": {normalize(x) for x in it["tamam"]},
+                "reveal": f"{it['bas']} {it['tamam'][0]}",
+                "match": "substring"}
+
+
+class _DogruYanlisProvider(_Provider):
+    key = "dogruyanlis"
+    label = "Doğru mu Yanlış mı"
+    _EVET = {"dogru", "evet", "d", "true", "dogrudur", "doru"}
+    _HAYIR = {"yanlis", "hayir", "y", "false", "yanlistir", "yalan"}
+
+    def __init__(self, items):
+        self.items = [it for it in items
+                      if isinstance(it, dict) and it.get("ifade") and isinstance(it.get("dogru"), bool)]
+
+    def intro(self, n):
+        return (f"Doğru mu Yanlış mı! Bir şey söyleyeceğim; doğru mu yanlış mı bil. "
+                f"{n} soru, doğrularını sayacağım.")
+
+    def next_question(self, used):
+        adaylar = [it for it in self.items if it["ifade"] not in used]
+        if not adaylar:
+            return None
+        it = random.choice(adaylar)
+        accept = self._EVET if it["dogru"] else self._HAYIR
+        dy = "Doğru" if it["dogru"] else "Yanlış"
+        return {"id": it["ifade"],
+                "prompt": f"'{it['ifade']}' — doğru mu, yanlış mı?",
+                "accept_norm": set(accept),
+                "reveal": f"{dy} — {it.get('aciklama', '')}".strip(" —"),
+                "match": "token"}
+
 # Kelime fazında yalnızca NET komutlar çıkıştır ("son", "bitti" gerçek kelime olabilir).
 _KEL_EXIT = {"cikis", "cik", "dur", "durdur", "kapat", "iptal", "vazgec", "vazgectim"}
 
 # Hazırlık fazında "oyunu başlat" onayı.
 _KEL_READY = {"basla", "baslayalim", "baslat", "hazir", "hazirim", "evet",
               "tamam", "tamamdir", "hadi", "oyna", "olur", "devam", "ok", "tabii"}
+
+# Quiz secim eslestirme (rakam + ad). normalize() ciktisiyla eslesir.
+_QUIZ_SELECT = {
+    "1": "eszit", "eszit": "eszit", "es": "eszit", "zit": "eszit", "anlam": "eszit",
+    "2": "atasozu", "atasozu": "atasozu", "atasoz": "atasozu", "deyim": "atasozu",
+    "3": "dogruyanlis", "dogruyanlis": "dogruyanlis", "yanlis": "dogruyanlis", "dy": "dogruyanlis",
+}
 
 # Kelime kategorisi eslestirme (rakam + ad). normalize() ciktisiyla eslesir.
 _KEL_CATEGORIES = {
@@ -376,10 +504,10 @@ class GameEngine:
     WORD_AI_BASE = 0.95        # baslangic basari olasiligi
     WORD_AI_DECAY = 0.30       # grace sonrasi her turda dusus
     WORD_AI_FLOOR = 0.05       # taban (AI ~4-5. cevapta yenilir)
-    EA_QUESTION_COUNT = 5      # es/zit anlam: soru sayisi
+    QUIZ_QUESTION_COUNT = 5    # bilgi yarismasi: soru sayisi
 
     def __init__(self, bridge=None, word_llm=None, categories=None, categories_path=None,
-                 ea_data=None, ea_path=None):
+                 ea_data=None, ea_path=None, atasozu_data=None, dogru_yanlis_data=None):
         # bridge: LLMBridge (kelime oyunu Ollama bilgisini buradan alir)
         self.bridge = bridge
         self._word_llm = word_llm   # WordLLM benzeri; None ise bridge'den lazy kurulur
@@ -399,18 +527,23 @@ class GameEngine:
         for ws in cats.values():
             self._all_words.update(temiz_kelime(w) for w in ws)
         self.word_category = None   # _reset_word'te SIFIRLANMAZ (bkz. plan notu)
-        # Es/Zit Anlam verisi + normalize-li kabul kumeleri
+        # Quiz saglayicilar (es/zit + atasozu + dogru/yanlis) — her biri tekduze soru uretir
         ea_src = ea_data if ea_data is not None else _load_es_zit(ea_path or _EA_DEFAULT_PATH)
         if not ea_src:
             ea_src = {temiz_kelime(k): v for k, v in _EA_FALLBACK.items()}
-        self._ea_data = ea_src
-        self._ea_norm = {
-            w: {tip: {normalize(x) for x in vals} for tip, vals in entry.items()}
-            for w, entry in self._ea_data.items()
+        ata_src = atasozu_data if atasozu_data is not None else _load_json_list(_ATASOZU_PATH)
+        if not ata_src:
+            ata_src = list(_ATASOZU_FALLBACK)
+        dy_src = dogru_yanlis_data if dogru_yanlis_data is not None else _load_json_list(_DY_PATH)
+        if not dy_src:
+            dy_src = list(_DY_FALLBACK)
+        self._providers = {
+            "eszit": _EsZitProvider(ea_src),
+            "atasozu": _AtasozuProvider(ata_src),
+            "dogruyanlis": _DogruYanlisProvider(dy_src),
         }
-        self._ea_words = [w for w, e in self._ea_data.items() if e]
         self._reset_word()
-        self._reset_ea()
+        self._reset_quiz()
 
     # ——— Kelime oyunu icin LLM (lazy; testte enjekte edilebilir) ————
     @property
@@ -434,12 +567,13 @@ class GameEngine:
         self.word_score = {"ai": 0, "user": 0}
         self.word_starter = None
 
-    def _reset_ea(self) -> None:
-        self.ea_turn = None              # "hazir" | "soru" | None
-        self.ea_used = set()
-        self.ea_score = {"dogru": 0, "toplam": 0}
-        self.ea_q_index = 0
-        self.ea_current = None
+    def _reset_quiz(self) -> None:
+        self.quiz_provider = None        # "eszit" | "atasozu" | "dogruyanlis"
+        self.quiz_turn = None            # "secim" | "hazir" | "soru" | None
+        self.quiz_used = set()
+        self.quiz_score = {"dogru": 0, "toplam": 0}
+        self.quiz_q_index = 0
+        self.quiz_current = None
 
     # ——— Genel durum sifirla ————————————————————————————————
     def _reset_scores(self) -> None:
@@ -453,7 +587,7 @@ class GameEngine:
         return [
             {"key": "1", "label": "✊ Taş Kağıt Makas"},
             {"key": "2", "label": "🔤 Kelime Türetme"},
-            {"key": "3", "label": "🔁 Eş/Zıt Anlam"},
+            {"key": "3", "label": "🧠 Bilgi Yarışması"},
         ]
 
     @staticmethod
@@ -488,7 +622,7 @@ class GameEngine:
         """Oyundan cik, sohbet moduna don."""
         self.phase = "idle"
         self._reset_word()
-        self._reset_ea()
+        self._reset_quiz()
         return {
             "phase": "idle",
             "kind": "exit",
@@ -514,7 +648,7 @@ class GameEngine:
         # diger fazlarda genis kelime kumesi gecerli. Timeout sinyalinde cikis kontrolu yok.
         if not timeout:
             active_game = ((self.phase == "kelime" and self.word_turn is not None) or
-                           (self.phase == "esanlam" and self.ea_turn is not None))
+                           (self.phase == "quiz" and self.quiz_turn is not None))
             if active_game:
                 if n in _KEL_EXIT:
                     return self.exit()
@@ -536,12 +670,14 @@ class GameEngine:
                 return self._handle_kelime_ready(text)
             # Kelime eslestirmesi Turkce harfleri korur (normalize degil, ham metin)
             return self._handle_kelime(text, timeout)
-        if self.phase == "esanlam":
-            if self.ea_turn is None:
-                return self._start_esanlam()   # bitti -> yeni oyun
-            if self.ea_turn == "hazir":
-                return self._handle_esanlam_ready(text)
-            return self._handle_esanlam(text, timeout)
+        if self.phase == "quiz":
+            if self.quiz_turn is None:
+                return self._start_quiz_menu()    # bitti -> alt-menu
+            if self.quiz_turn == "secim":
+                return self._handle_quiz_select(text)
+            if self.quiz_turn == "hazir":
+                return self._handle_quiz_ready(text)
+            return self._handle_quiz(text, timeout)
         # idle iken girdi gelirse menuyu ac
         return self.start()
 
@@ -555,9 +691,9 @@ class GameEngine:
                     "tas", "kagit", "makas")
         if n in rps_keys or "tas kagit" in n or "kagit makas" in n:
             return self._start_rps()
-        # Es/Zit Anlam
-        if n in ("3", "uc", "ucuncu") or "anlam" in n:
-            return self._start_esanlam()
+        # Bilgi Yarismasi (quiz alt-menu)
+        if n in ("3", "uc", "ucuncu") or "bilgi" in n or "yaris" in n or "anlam" in n or "quiz" in n:
+            return self._start_quiz_menu()
         # Anlasilmadi
         return {
             "phase": "menu",
@@ -982,48 +1118,32 @@ class GameEngine:
         payload["ai_error"] = ai_error  # True ise: gercek pes degil, Ollama erisilemedi
         return payload
 
-    # ——— Es/Zit Anlam (dostca puanli quiz) ————————————————————
-    def _ea_next_question(self):
-        """Kullanilmamis rastgele kelime + o kelimede mevcut rastgele tip sec.
-        Tukenince None. ea_current'i de gunceller."""
-        adaylar = [w for w in self._ea_words if w not in self.ea_used]
-        if not adaylar:
-            return None
-        kelime = random.choice(adaylar)
-        tipler = [t for t in ("es", "zit") if self._ea_data[kelime].get(t)]
-        tip = random.choice(tipler)
-        self.ea_used.add(kelime)
-        self.ea_current = {
-            "kelime": kelime,
-            "tip": tip,
-            "kabul_norm": self._ea_norm[kelime][tip],
-            "kabul_goster": self._ea_data[kelime][tip],
-        }
-        return self.ea_current
+    # ——— Bilgi Yarismasi (ortak quiz motoru) ————————————————————
+    @staticmethod
+    def _quiz_menu_buttons():
+        return [{"key": "eszit", "label": "🔁 Eş/Zıt Anlam"},
+                {"key": "atasozu", "label": "📜 Atasözü"},
+                {"key": "dogruyanlis", "label": "✅ Doğru/Yanlış"},
+                {"key": "cikis", "label": "Çıkış"}]
 
-    def _ea_check_answer(self, text: str) -> bool:
-        """Kullanici cevabi (normalize) mevcut sorunun kabul kumesinde mi? (lenient)."""
-        cur = self.ea_current
-        if not cur:
-            return False
-        un = normalize(text)
-        if not un:
-            return False
-        cand = {un} | set(un.split())
-        return bool(cur["kabul_norm"] & cand)
+    @staticmethod
+    def _quiz_ready_buttons():
+        return [{"key": "basla", "label": "▶ Başla"},
+                {"key": "cikis", "label": "Çıkış"}]
 
-    def _ea_payload(self, kind, *, turn, jest_id, yanit, yogunluk=0.8,
-                    ea_progress=None, dogru_mu=None, timer=None, ended=False, buttons=None):
+    def _quiz_payload(self, kind, *, turn, jest_id, yanit, yogunluk=0.8,
+                      quiz_progress=None, dogru_mu=None, timer=None, ended=False, buttons=None):
         return {
-            "game": "esanlam",
+            "game": "quiz",
             "phase": self.phase,
             "kind": kind,
             "turn": turn,
+            "quiz": self.quiz_provider,
             "jest_id": jest_id,
             "yogunluk": yogunluk,
             "yanit": yanit,
-            "score": None,                 # quiz ilerlemesi ea_progress'te
-            "ea_progress": ea_progress,
+            "score": None,                 # ilerleme quiz_progress'te
+            "quiz_progress": quiz_progress,
             "dogru_mu": dogru_mu,
             "timer": timer,
             "buttons": buttons if buttons is not None else [{"key": "cikis", "label": "Çıkış"}],
@@ -1031,94 +1151,127 @@ class GameEngine:
             "outcome": None,
         }
 
-    @staticmethod
-    def _ea_ready_buttons():
-        return [{"key": "basla", "label": "▶ Başla"},
-                {"key": "cikis", "label": "Çıkış"}]
+    def _start_quiz_menu(self) -> dict:
+        """Bilgi Yarismasi alt-menusu (hangi quiz?)."""
+        self.phase = "quiz"
+        self._reset_quiz()
+        self.quiz_turn = "secim"
+        return self._quiz_payload(
+            "quiz_menu", turn="secim", jest_id=random.choice(_JEST["kel_intro"]),
+            yanit="Bilgi Yarışması! Hangisi?  1) Eş/Zıt Anlam   2) Atasözü   3) Doğru/Yanlış",
+            yogunluk=0.8, timer=None, buttons=self._quiz_menu_buttons())
 
-    def _start_esanlam(self) -> dict:
-        """Kurallari anlat + 'basla' bekle (henuz soru/sure yok)."""
-        self.phase = "esanlam"
-        self._reset_ea()
-        self.ea_turn = "hazir"
-        yanit = (
-            "Eş/Zıt Anlam oyunu! Sana kelimeler söyleyeceğim; her birinin EŞ ya da ZIT "
-            f"anlamlısını bul. {self.EA_QUESTION_COUNT} soru, doğrularını sayacağım. "
-            "Hazırsan başlayalım — 'başla' de ya da butona dokun!"
-        )
-        return self._ea_payload(
-            "ea_ready", turn="hazir", jest_id=random.choice(_JEST["kel_intro"]),
-            yanit=yanit, yogunluk=0.8, timer=None, buttons=self._ea_ready_buttons())
+    def _handle_quiz_select(self, text: str) -> dict:
+        n = normalize(text)
+        key = _QUIZ_SELECT.get(n)
+        if key is None:
+            for w in n.split():
+                if w in _QUIZ_SELECT:
+                    key = _QUIZ_SELECT[w]
+                    break
+        if key is None or key not in self._providers:
+            return self._quiz_payload(
+                "quiz_menu", turn="secim", jest_id="soru_isareti",
+                yanit="Bir yarışma seç :)  1) Eş/Zıt  2) Atasözü  3) Doğru/Yanlış",
+                yogunluk=0.6, timer=None, buttons=self._quiz_menu_buttons())
+        self.quiz_provider = key
+        return self._start_quiz()
 
-    def _handle_esanlam_ready(self, text: str) -> dict:
+    def _start_quiz(self) -> dict:
+        """Secilen quiz icin kurallari anlat + 'basla' bekle."""
+        self.phase = "quiz"
+        self.quiz_used = set()
+        self.quiz_score = {"dogru": 0, "toplam": 0}
+        self.quiz_q_index = 0
+        self.quiz_current = None
+        self.quiz_turn = "hazir"
+        prov = self._providers[self.quiz_provider]
+        yanit = prov.intro(self.QUIZ_QUESTION_COUNT) + " Hazırsan başlayalım — 'başla' de ya da butona dokun!"
+        return self._quiz_payload(
+            "quiz_ready", turn="hazir", jest_id=random.choice(_JEST["kel_intro"]),
+            yanit=yanit, yogunluk=0.8, timer=None, buttons=self._quiz_ready_buttons())
+
+    def _handle_quiz_ready(self, text: str) -> dict:
         n = normalize(text)
         if n in _KEL_READY or any(w in _KEL_READY for w in n.split()):
-            return self._begin_esanlam()
-        return self._ea_payload(
-            "ea_ready", turn="hazir", jest_id="bekle",
+            return self._begin_quiz()
+        return self._quiz_payload(
+            "quiz_ready", turn="hazir", jest_id="bekle",
             yanit="Hazır olunca 'başla' de ya da butona dokun :)", yogunluk=0.6,
-            timer=None, buttons=self._ea_ready_buttons())
+            timer=None, buttons=self._quiz_ready_buttons())
 
-    def _begin_esanlam(self) -> dict:
-        self.ea_used = set()
-        self.ea_score = {"dogru": 0, "toplam": 0}
-        self.ea_q_index = 0
-        return self._ea_ask_next()
+    def _begin_quiz(self) -> dict:
+        self.quiz_used = set()
+        self.quiz_score = {"dogru": 0, "toplam": 0}
+        self.quiz_q_index = 0
+        return self._quiz_ask_next()
 
-    def _ea_ask_next(self, prefix=None, dogru_mu=None) -> dict:
+    def _quiz_ask_next(self, prefix=None, dogru_mu=None) -> dict:
         """Sonraki soruyu sor; soru kalmadi/sayi doldu -> bitir.
         prefix: bir onceki cevabin geri bildirimi (ayni mesaja eklenir)."""
-        if self.ea_q_index >= self.EA_QUESTION_COUNT:
-            return self._ea_end(prefix=prefix)
-        q = self._ea_next_question()
+        if self.quiz_q_index >= self.QUIZ_QUESTION_COUNT:
+            return self._quiz_end(prefix=prefix)
+        prov = self._providers[self.quiz_provider]
+        q = prov.next_question(self.quiz_used)
         if q is None:
-            return self._ea_end(prefix=prefix)
-        self.ea_q_index += 1
-        self.ea_turn = "soru"
-        tip_ad = "eş" if q["tip"] == "es" else "zıt"
-        soru = f"'{_cap(q['kelime'])}' kelimesinin {tip_ad} anlamlısı ne?"
-        yanit = f"{prefix} {soru}" if prefix else soru
+            return self._quiz_end(prefix=prefix)
+        self.quiz_used.add(q["id"])
+        self.quiz_current = q
+        self.quiz_q_index += 1
+        self.quiz_turn = "soru"
+        yanit = f"{prefix} {q['prompt']}" if prefix else q["prompt"]
         if dogru_mu is True:
             jest = random.choice(_JEST["kel_user_ok"])
         elif dogru_mu is False:
             jest = random.choice(_JEST["kel_retry"])
         else:
             jest = random.choice(_JEST["kel_intro"])
-        return self._ea_payload(
-            "ea_question", turn="soru", jest_id=jest, yanit=yanit, yogunluk=0.85,
+        return self._quiz_payload(
+            "quiz_question", turn="soru", jest_id=jest, yanit=yanit, yogunluk=0.85,
             dogru_mu=dogru_mu,
-            ea_progress=f"Soru {self.ea_q_index}/{self.EA_QUESTION_COUNT} · Doğru {self.ea_score['dogru']}",
+            quiz_progress=f"Soru {self.quiz_q_index}/{self.QUIZ_QUESTION_COUNT} · Doğru {self.quiz_score['dogru']}",
             timer={"seconds": self.USER_TURN_SECONDS, "who": "user"})
 
-    def _handle_esanlam(self, text: str, timeout: bool) -> dict:
-        cur = self.ea_current
-        beklenen = cur["kabul_goster"][0] if cur else "?"
-        self.ea_score["toplam"] += 1
-        if not timeout and self._ea_check_answer(text):
-            self.ea_score["dogru"] += 1
-            geri = random.choice(_TXT["kel_user_ok"]) + f" '{_cap(beklenen)}' doğru."
+    def _quiz_check(self, q, text: str) -> bool:
+        """Cevap kontrolu — token (kume kesisimi) veya substring (atasozu)."""
+        un = normalize(text)
+        if not un:
+            return False
+        acc = q["accept_norm"]
+        if q.get("match") == "substring":
+            return any(a and (a in un or un in a) for a in acc)
+        cand = {un} | set(un.split())
+        return bool(acc & cand)
+
+    def _handle_quiz(self, text: str, timeout: bool) -> dict:
+        q = self.quiz_current
+        beklenen = (q["reveal"] if q else "?").rstrip(" .")  # cift nokta olmasin
+        self.quiz_score["toplam"] += 1
+        if not timeout and q and self._quiz_check(q, text):
+            self.quiz_score["dogru"] += 1
+            geri = random.choice(_TXT["kel_user_ok"]) + f" Cevap: {beklenen}."
             dogru = True
         else:
-            geri = (f"Süre doldu! Ben '{_cap(beklenen)}' diyecektim."
-                    if timeout else f"Yaklaştın! Ben '{_cap(beklenen)}' diyecektim 😊")
+            geri = (f"Süre doldu! Doğrusu: {beklenen}."
+                    if timeout else f"Yaklaştın! Doğrusu: {beklenen}.")
             dogru = False
-        return self._ea_ask_next(prefix=geri, dogru_mu=dogru)
+        return self._quiz_ask_next(prefix=geri, dogru_mu=dogru)
 
-    def _ea_end(self, prefix=None) -> dict:
-        self.ea_turn = None
-        d = self.ea_score["dogru"]
-        t = self.ea_score["toplam"] or self.EA_QUESTION_COUNT
+    def _quiz_end(self, prefix=None) -> dict:
+        self.quiz_turn = None
+        d = self.quiz_score["dogru"]
+        t = self.quiz_score["toplam"] or self.QUIZ_QUESTION_COUNT
         if d >= t * 0.8:
-            jest = random.choice(_JEST["kel_user_ok"]); kapanis = "Harikasın, kelime hazinen çok geniş!"
+            jest = random.choice(_JEST["kel_user_ok"]); kapanis = "Harikasın!"
         elif d >= t * 0.4:
-            jest = random.choice(_JEST["kel_intro"]); kapanis = "İyi gidiyorsun, güzel oynadın!"
+            jest = random.choice(_JEST["kel_intro"]); kapanis = "Güzel oynadın!"
         else:
-            jest = "huzur"; kapanis = "Önemli değil, oynamak güzeldi — yine beklerim!"
-        yanit = f"{prefix + ' ' if prefix else ''}Oyun bitti! {d}/{t} doğru. {kapanis}"
-        return self._ea_payload(
-            "ea_end", turn=None, jest_id=jest, yanit=yanit, yogunluk=0.9,
-            ea_progress=f"Bitti · {d}/{t} doğru", timer=None, ended=True,
-            buttons=[{"key": "esanlam", "label": "🔁 Yeni oyun"}, {"key": "cikis", "label": "Çıkış"}])
+            jest = "huzur"; kapanis = "Önemli değil, yine beklerim!"
+        yanit = f"{prefix + ' ' if prefix else ''}Bitti! {d}/{t} doğru. {kapanis}"
+        return self._quiz_payload(
+            "quiz_end", turn=None, jest_id=jest, yanit=yanit, yogunluk=0.9,
+            quiz_progress=f"Bitti · {d}/{t} doğru", timer=None, ended=True,
+            buttons=[{"key": "bilgi", "label": "🔁 Yeni yarışma"}, {"key": "cikis", "label": "Çıkış"}])
 
     # ——— Durum ————————————————————————————————————————————
     def status(self) -> dict:
