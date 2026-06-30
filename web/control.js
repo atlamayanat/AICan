@@ -41,6 +41,7 @@
     gameStartBtn: $('#game-start-btn'),
     gameButtons: $('#game-buttons'),
     gameScore: $('#game-score'),
+    gameTheme: $('#game-theme'),
     wordTimer: $('#word-timer'),
   };
 
@@ -638,6 +639,10 @@
       updateGameScoreUI(p.score);
     }
     renderGameButtons(p.buttons || []);
+    if (els.gameTheme) {
+      const adlar = { edebiyat: 'Edebiyat', tarih: 'Tarih', bilim: 'Bilim', genel: 'Genel' };
+      els.gameTheme.textContent = p.category ? ('Tema: ' + (adlar[p.category] || p.category)) : '';
+    }
 
     if (p.kind === 'round') {
       log('jest', 'oyun: ' + p.outcome + ' → ' + p.jest_id

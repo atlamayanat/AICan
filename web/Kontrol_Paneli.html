@@ -502,6 +502,8 @@
   .game-card .panel-h h2 { color: var(--neon-amber); }
   .game-card .panel-body { display: flex; flex-direction: column; gap: 8px; }
   #game-score { color: var(--neon-amber); letter-spacing: 0.14em; }
+  .game-theme { color: var(--neon-amber); font-size: 11px; letter-spacing: 0.08em; margin: 2px 0 4px; }
+  .game-theme:empty { display: none; }
   .game-buttons { display: flex; gap: 6px; flex-wrap: wrap; }
   .game-buttons:empty { display: none; }
   .game-buttons .btn { flex: 1 1 auto; min-width: 72px; }
@@ -713,6 +715,7 @@
           </div>
           <div class="panel-body">
             <button class="btn primary" id="game-start-btn">🎮 OYUN OYNAYALIM</button>
+            <div class="game-theme" id="game-theme"></div>
             <div class="game-buttons" id="game-buttons"></div>
             <div class="word-timer hidden" id="word-timer">
               <div class="wt-row"><span class="wt-label">—</span><span class="wt-num"></span></div>

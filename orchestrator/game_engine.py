@@ -14,9 +14,11 @@ DEGISMEZ; oyun ek bir katmandir.
 """
 from __future__ import annotations
 
+import json
 import logging
 import random
 import re
+from pathlib import Path
 
 from word_llm import son_harf, temiz_kelime
 
@@ -225,12 +227,48 @@ _TR_COMMON_WORDS = frozenset({
     "kaşık", "bıçak", "tencere", "tava", "buzdolabı", "soba", "ütü", "süpürge", "kova",
 })
 
+# ——— Kategorili kelime havuzu (AI temali kelimeler buradan secilir) ————
+# JSON yalnizca 3 temayi (edebiyat/tarih/bilim) tutar; "genel" yukaridaki
+# _TR_COMMON_WORDS'ten gelir (cift kaynak yok + saglam fallback korunur).
+_DEFAULT_CATS_PATH = Path(__file__).resolve().parent.parent / "ai" / "word_categories.json"
+
+
+def _index_by_first_letter(words):
+    """Kelime listesini ilk harfe gore grupla: {harf: [kelime,...]} (temiz_kelime'li)."""
+    idx = {}
+    for w in words:
+        w = temiz_kelime(w)
+        if len(w) < 2:
+            continue
+        idx.setdefault(w[0], []).append(w)
+    return idx
+
+
+def _load_word_categories(path):
+    """JSON'dan temali kategorileri yukle: {kategori: [kelime,...]}.
+    Hata (yok/bozuk) -> {} (yalniz 'genel' kullanilir)."""
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+        return {k: [temiz_kelime(w) for w in v if temiz_kelime(w)]
+                for k, v in data.items() if isinstance(v, list)}
+    except (OSError, json.JSONDecodeError, ValueError) as e:
+        log.warning("word_categories.json okunamadi: %s — yalniz 'genel' kullanilacak", e)
+        return {}
+
 # Kelime fazında yalnızca NET komutlar çıkıştır ("son", "bitti" gerçek kelime olabilir).
 _KEL_EXIT = {"cikis", "cik", "dur", "durdur", "kapat", "iptal", "vazgec", "vazgectim"}
 
 # Hazırlık fazında "oyunu başlat" onayı.
 _KEL_READY = {"basla", "baslayalim", "baslat", "hazir", "hazirim", "evet",
               "tamam", "tamamdir", "hadi", "oyna", "olur", "devam", "ok", "tabii"}
+
+# Kelime kategorisi eslestirme (rakam + ad). normalize() ciktisiyla eslesir.
+_KEL_CATEGORIES = {
+    "1": "edebiyat", "edebiyat": "edebiyat",
+    "2": "tarih",    "tarih": "tarih",
+    "3": "bilim",    "bilim": "bilim",
+    "4": "genel",    "genel": "genel",
+}
 
 
 def _cap(w: str) -> str:
@@ -298,7 +336,7 @@ class GameEngine:
     WORD_AI_DECAY = 0.30       # grace sonrasi her turda dusus
     WORD_AI_FLOOR = 0.05       # taban (AI ~4-5. cevapta yenilir)
 
-    def __init__(self, bridge=None, word_llm=None):
+    def __init__(self, bridge=None, word_llm=None, categories=None, categories_path=None):
         # bridge: LLMBridge (kelime oyunu Ollama bilgisini buradan alir)
         self.bridge = bridge
         self._word_llm = word_llm   # WordLLM benzeri; None ise bridge'den lazy kurulur
@@ -308,6 +346,16 @@ class GameEngine:
         self.lose_streak = 0
         self.round_count = 0
         self._last_cheated = False
+        # Kategorili kelime havuzu: temali kategoriler (JSON/enjekte) + "genel" (kod)
+        cats = categories if categories is not None else _load_word_categories(
+            categories_path or _DEFAULT_CATS_PATH)
+        cats = {k: list(v) for k, v in cats.items()}
+        cats.setdefault("genel", sorted(_TR_COMMON_WORDS))
+        self._pools = {c: _index_by_first_letter(ws) for c, ws in cats.items()}
+        self._all_words = set(_TR_COMMON_WORDS)
+        for ws in cats.values():
+            self._all_words.update(temiz_kelime(w) for w in ws)
+        self.word_category = None   # _reset_word'te SIFIRLANMAZ (bkz. plan notu)
         self._reset_word()
 
     # ——— Kelime oyunu icin LLM (lazy; testte enjekte edilebilir) ————
@@ -414,8 +462,10 @@ class GameEngine:
             return self._handle_rps(n)
         if self.phase == "kelime":
             if self.word_turn is None:
-                # oyun bitti — herhangi girdi "yeni oyun" demektir (kurallari tekrar anlatir)
-                return self._start_kelime()
+                # oyun bitti — herhangi girdi "yeni oyun" = tema secimini tekrar ac
+                return self._start_kelime_category()
+            if self.word_turn == "kategori":
+                return self._handle_kelime_category(text)
             if self.word_turn == "hazir":
                 # kurallar anlatildi, oyuncunun "basla" onayini bekliyoruz
                 return self._handle_kelime_ready(text)
@@ -428,7 +478,7 @@ class GameEngine:
     def _handle_menu(self, n: str) -> dict:
         # Kelime Turetme (Faz 3)
         if n in ("2", "iki", "ikinci") or "kelime" in n:
-            return self._start_kelime()
+            return self._start_kelime_category()
         # Tas-Kagit-Makas
         rps_keys = ("1", "bir", "birinci", "tkm", "tas kagit makas",
                     "tas", "kagit", "makas")
@@ -616,6 +666,7 @@ class GameEngine:
         return {
             "game": "kelime",
             "phase": self.phase,
+            "category": self.word_category,
             "kind": kind,
             "turn": turn,
             "required_letter": required_letter,
@@ -643,34 +694,76 @@ class GameEngine:
         """Kelime gercek bir Turkce sozcuk mu? Once yerel yaygin-kelime sozlugu
         (LLM'siz, aninda) — cogu turda Ollama'ya hic gidilmez, gecikme sifir.
         Sozlukte yoksa LLM'e sor (lenient: model down/kararsiz -> kabul)."""
-        if w in _TR_COMMON_WORDS:
+        if w in self._all_words:
             return True
         return self.word_llm.gecerli_mi(w)
 
-    def _local_ai_word(self, req: str):
-        """Ollama erisilemezken AI'nin oynayabilecegi yerel kelime: `req` harfiyle
-        baslayan, kullanilmamis yaygin bir kelime. Bulamazsa None (AI pes eder)."""
-        if req:
-            adaylar = [w for w in _TR_COMMON_WORDS
-                       if w and w[0] == req and w not in self.word_used]
+    def _pick_ai_word(self, category, req_letter, used):
+        """AI'nin temali kelimesi: `category` havuzundan `req_letter` ile baslayan,
+        kullanilmamis rastgele kelime. Kategori yoksa 'genel'e duser; o harfte kelime
+        yoksa None (AI temaya uygun pes eder)."""
+        pool = self._pools.get(category) or self._pools.get("genel", {})
+        if req_letter:
+            cands = [w for w in pool.get(req_letter, []) if w not in used]
         else:
-            adaylar = [w for w in _KEL_SEED
-                       if temiz_kelime(w) not in self.word_used]
-        return random.choice(adaylar) if adaylar else None
+            cands = [w for ws in pool.values() for w in ws if w not in used]
+        return random.choice(cands) if cands else None
 
     @staticmethod
     def _kel_ready_buttons():
         return [{"key": "basla", "label": "▶ Başla"},
                 {"key": "cikis", "label": "Çıkış"}]
 
+    @staticmethod
+    def _kel_category_buttons():
+        return [{"key": "edebiyat", "label": "📖 Edebiyat"},
+                {"key": "tarih",    "label": "🏛 Tarih"},
+                {"key": "bilim",    "label": "🔬 Bilim"},
+                {"key": "genel",    "label": "🎲 Genel"},
+                {"key": "cikis",    "label": "Çıkış"}]
+
+    def _start_kelime_category(self) -> dict:
+        """'Kelime Türetme' secildi: once tema sor (oyun henuz baslamaz)."""
+        self.phase = "kelime"
+        self._reset_word()
+        self.word_category = None          # yeni secim
+        self.word_turn = "kategori"
+        return self._kel_payload(
+            "category_select", turn="kategori", jest_id=random.choice(_JEST["kel_intro"]),
+            yanit="Hangi temada oynayalım?  1) Edebiyat   2) Tarih   3) Bilim   4) Genel",
+            yogunluk=0.8, timer=None, buttons=self._kel_category_buttons())
+
+    def _handle_kelime_category(self, text: str) -> dict:
+        """Tema secimini isle; gecerliyse kurallara gec, degilse tekrar sor."""
+        n = normalize(text)
+        cat = _KEL_CATEGORIES.get(n)
+        if cat is None:
+            for w in n.split():
+                if w in _KEL_CATEGORIES:
+                    cat = _KEL_CATEGORIES[w]
+                    break
+        if cat is None:
+            return self._kel_payload(
+                "category_select", turn="kategori", jest_id="soru_isareti",
+                yanit="Bir tema seç :)  1) Edebiyat  2) Tarih  3) Bilim  4) Genel",
+                yogunluk=0.6, timer=None, buttons=self._kel_category_buttons())
+        if cat not in self._pools:
+            log.warning("Kategori havuzu yok (%r) — genel'e dusuldu", cat)
+            cat = "genel"
+        self.word_category = cat
+        return self._start_kelime()
+
     def _start_kelime(self) -> dict:
         """Önce kuralları anlat + 'hazırsan başlayalım' de. Oyun HENÜZ başlamaz (süre yok)."""
         self.phase = "kelime"
         self._reset_word()
         self.word_turn = "hazir"   # onay bekleniyor
+        _tema_ad = {"edebiyat": "Edebiyat", "tarih": "Tarih", "bilim": "Bilim"}.get(self.word_category)
+        _bas = f"{_tema_ad} temasında kelime türetme oynayalım! " if _tema_ad else "Kelime türetme oynayalım! "
         yanit = (
-            "Kelime türetme oynayalım! Kuralı basit: ben bir kelime söylerim, sen onun "
-            "SON harfiyle başlayan yeni bir Türkçe kelime söylersin; sonra sırayla devam ederiz. "
+            _bas +
+            "Ben temaya uygun bir kelime söylerim, sen onun SON harfiyle başlayan "
+            "(istediğin) bir Türkçe kelime söylersin; sırayla devam ederiz. "
             "Aynı kelimeyi iki kez kullanamayız ve her turda "
             f"{self.USER_TURN_SECONDS} saniyen olur. Hazırsan başlayalım — 'başla' de ya da butona dokun!"
         )
@@ -696,7 +789,7 @@ class GameEngine:
         Oyun sırasında AI yalnızca KELİMEYLE cevap verir (yanit = kelime)."""
         self.word_starter = "ai" if random.random() < 0.5 else "user"
         if self.word_starter == "ai":
-            kelime = random.choice(_KEL_SEED)
+            kelime = self._pick_ai_word(self.word_category, None, self.word_used) or random.choice(_KEL_SEED)
             self.word_used.add(temiz_kelime(kelime))
             self.word_last = kelime
             self.word_required_letter = son_harf(kelime)
@@ -782,19 +875,10 @@ class GameEngine:
                 required_letter=self.word_required_letter, timer=None)
 
         req = self.word_required_letter
+        # AI kelimeleri artik saf havuzdan (LLM yok) -> Ollama'dan bagimsiz, halusinasyonsuz.
         basarili = random.random() < self._word_ai_success_p()
-        kelime = self.word_llm.uret_kelime(req, self.word_used) if basarili else None
-
-        # Sergi saglamligi: AI denemeliyken (basarili) Ollama coktuyse AI her turda
-        # sessizce pes etmesin — yerel sozlukten oynayip oyunu surdur, gorevliye logla.
-        ai_error = False
-        if basarili and not kelime and getattr(self.word_llm, "unreachable", False):
-            kelime = self._local_ai_word(req)
-            ai_error = True
-            if kelime:
-                log.warning("Kelime AI: Ollama erisilemiyor — yerel sozlukten oynandi (%r)", kelime)
-            else:
-                log.warning("Kelime AI: Ollama erisilemiyor, yerel kelime yok (harf=%r) — pes", req)
+        kelime = self._pick_ai_word(self.word_category, req, self.word_used) if basarili else None
+        ai_error = False  # AI Ollama gerektirmez; "Ollama-down -> sessiz pes" ayrimi yok
 
         if kelime:
             self.word_used.add(temiz_kelime(kelime))
