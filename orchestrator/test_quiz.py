@@ -1,4 +1,4 @@
-"""Ortak quiz motoru + 3 saglayici — standalone testler (Ollama gerektirmez).
+"""Ortak quiz motoru + 3 saglayici + DUZ 4 oyunlu menu — standalone testler (Ollama gerektirmez).
 Calistir: PYTHONUTF8=1 PYTHONIOENCODING=utf-8 python orchestrator/test_quiz.py
 """
 from __future__ import annotations
@@ -74,44 +74,81 @@ def test_quiz_check_modes():
     check("bos", not g._quiz_check({"accept_norm": {"beyaz"}, "match": "token"}, ""))
 
 
-# ——— Akis ———
-def test_menu_to_quiz_submenu():
+# ——— Duz 4 oyunlu menu akisi ———
+def test_menu_flat_4():
     g = make_engine()
     p = g.start()
-    check("menude bilgi(3)", "3" in {b["key"] for b in p["buttons"]})
-    p = g.handle("3")
-    check("3 -> quiz_menu", p["kind"] == "quiz_menu")
-    keys = {b["key"] for b in p["buttons"]}
-    check("alt-menu butonlari", {"eszit", "atasozu", "dogruyanlis"} <= keys)
+    check("menu fazi", p["phase"] == "menu" and p["game"] == "menu")
+    keys = [b["key"] for b in p["buttons"]]
+    check("duz 4 buton", keys == ["kelime", "eszit", "atasozu", "dogruyanlis"])
+
+
+def test_menu_selects_each_game():
+    # Menuden dogrudan (alt-menu YOK) her oyuna gecis
+    g = make_engine()
+    g.start()
+    p = g.handle("kelime")
+    check("kelime secildi", p["game"] == "kelime" and p["turn"] == "hazir")
+    for sel in ("eszit", "atasozu", "dogruyanlis"):
+        g.start()
+        p = g.handle(sel)
+        check(f"{sel} ready (dogrudan)", p["kind"] == "quiz_ready" and g.quiz_provider == sel)
 
 
 def test_quiz_full_flow_each_provider():
-    for sel, key in (("eszit", "eszit"), ("atasozu", "atasozu"), ("dogruyanlis", "dogruyanlis")):
+    for sel in ("eszit", "atasozu", "dogruyanlis"):
         g = make_engine()
         g.start()
-        g.handle("3")
         p = g.handle(sel)
-        check(f"{sel}: ready", p["kind"] == "quiz_ready" and g.quiz_provider == key)
+        check(f"{sel}: ready", p["kind"] == "quiz_ready" and g.quiz_provider == sel)
         p = g.handle("başla")
         check(f"{sel}: question", p["kind"] == "quiz_question")
         q = g.quiz_current
         ans = next(iter(q["accept_norm"]))
         p = g.handle(ans)
-        check(f"{sel}: cevap islendi",
-              g.quiz_score["toplam"] == 1 and p["kind"] in ("quiz_question", "quiz_end"))
+        check(f"{sel}: dogru cevap islendi",
+              g.quiz_score["toplam"] == 1 and g.quiz_score["dogru"] == 1
+              and p["kind"] in ("quiz_question", "quiz_end"))
 
 
-def test_quiz_invalid_select_reprompts():
+def _play_until_end(g, answer="evet"):
+    """Soru sayisi dolana YA DA veri tukenene kadar cevapla; bitis payload'unu don."""
+    p = None
+    for _ in range(GameEngine.QUIZ_QUESTION_COUNT + 3):
+        p = g.handle(answer)
+        if p.get("ended"):
+            break
+    return p
+
+
+def test_quiz_ends_and_returns_to_menu():
+    # Soru sayisi(5) veya veri tukenmesi -> quiz_end (dogru davranis; TEST_DY 2 madde).
     g = make_engine()
-    g.start(); g.handle("3")
+    g.start(); g.handle("dogruyanlis"); g.handle("başla")
+    p = _play_until_end(g)
+    check("quiz_end", p["kind"] == "quiz_end" and p["ended"] is True)
+    end_keys = [b["key"] for b in p["buttons"]]
+    check("bitis butonlari", end_keys == ["tekrar", "menu", "cikis"])
+    # 'menu' -> ana menuye don
+    p = g.handle("menu")
+    check("bitisten menuye", p["phase"] == "menu")
+    # 'tekrar' -> ayni yarismayi yeniden baslat
+    g.start(); g.handle("eszit"); g.handle("başla")
+    _play_until_end(g, answer="x")
+    p = g.handle("tekrar")
+    check("tekrar -> yeni yarisma", p["kind"] == "quiz_ready" and g.quiz_provider == "eszit")
+
+
+def test_invalid_menu_reprompts():
+    g = make_engine()
+    g.start()
     p = g.handle("asdf")
-    check("gecersiz secim -> tekrar", p["kind"] == "quiz_menu")
-    check("provider hala None", g.quiz_provider is None)
+    check("gecersiz secim -> reprompt", p["kind"] == "reprompt" and p["phase"] == "menu")
 
 
 def test_quiz_exit():
     g = make_engine()
-    g.start(); g.handle("3"); g.handle("eszit"); g.handle("başla")
+    g.start(); g.handle("eszit"); g.handle("başla")
     p = g.handle("çıkış")
     check("cikis -> idle", g.phase == "idle" and p["phase"] == "idle")
 
@@ -127,24 +164,29 @@ def test_http_quiz():
     def post(u, **b):
         return c.post(u, json=b or None).get_json()
 
-    post("/api/game/start")
-    p = post("/api/game/input", text="3")
-    check("http quiz_menu", p["kind"] == "quiz_menu")
+    p = post("/api/game/start")
+    check("http menu", p["phase"] == "menu"
+          and [b["key"] for b in p["buttons"]] == ["kelime", "eszit", "atasozu", "dogruyanlis"])
     for sel in ("eszit", "atasozu", "dogruyanlis"):
         post("/api/game/start")
-        post("/api/game/input", text="3")
         post("/api/game/input", text=sel)
         p = post("/api/game/input", text="başla")
         check(f"http {sel} question", p["kind"] == "quiz_question" and p["quiz"] == sel)
+    # Kelime hala menuden erisilebilir
+    post("/api/game/start")
+    p = post("/api/game/input", text="kelime")
+    check("http kelime ready", p["game"] == "kelime" and p["turn"] == "hazir")
 
 
 if __name__ == "__main__":
     test_providers()
     test_quiz_state_init()
     test_quiz_check_modes()
-    test_menu_to_quiz_submenu()
+    test_menu_flat_4()
+    test_menu_selects_each_game()
     test_quiz_full_flow_each_provider()
-    test_quiz_invalid_select_reprompts()
+    test_quiz_ends_and_returns_to_menu()
+    test_invalid_menu_reprompts()
     test_quiz_exit()
     test_http_quiz()
     print(f"\nSonuc: {_PASS} PASS / {_FAIL} FAIL")

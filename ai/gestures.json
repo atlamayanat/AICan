@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "toplam_jest": 31,
+  "toplam_jest": 32,
   "kategoriler": {
     "duygu_tepkisi": "AI'nin ic durumunu, hissini, atmosferini gosteren jestler",
     "cevap_tepkisi": "AI'nin kullanici mesajina iletisimsel cevabi"
@@ -147,13 +147,46 @@
         "sure_sn": 3.5,
         "yogunluk_varsayilan": 0.85
       },
-      "aciklama": "Oyunsu, cocuksu ve canli bir hareketlilik.",
+      "aciklama": "Canli, neseli bir mutluluk; pozitif ve oyunsu bir hal.",
       "tetikleyiciler": [
         "cok eglenceli",
-        "guldum",
+        "keyfim yerinde",
         "cocuklarla oynadim",
-        "sakalas",
-        "danstayim"
+        "danstayim",
+        "icim kipir kipir"
+      ],
+      "gorsel_tipi": "emoji",
+      "emoji_kaynak": "1f603"
+    },
+    {
+      "id": "kahkaha",
+      "kategori": "duygu_tepkisi",
+      "duygu_valansi": 0.85,
+      "uyarilma_seviyesi": 0.8,
+      "animasyon": {
+        "ana_renk": [
+          255,
+          220,
+          70
+        ],
+        "ikincil_renk": [
+          255,
+          160,
+          40
+        ],
+        "desen": "bouncing",
+        "hiz": "cok_hizli",
+        "sure_sn": 3.0,
+        "yogunluk_varsayilan": 0.95
+      },
+      "aciklama": "Kahkaha; komik bir seye katila katila, yuksek sesle gulme.",
+      "tetikleyiciler": [
+        "cok komik",
+        "guldum",
+        "kahkaha attim",
+        "espri yaptin",
+        "gulmekten kirildim",
+        "cok guldum"
       ],
       "gorsel_tipi": "emoji",
       "emoji_kaynak": "1f923"

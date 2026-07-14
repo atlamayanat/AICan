@@ -16,7 +16,10 @@ from __future__ import annotations
 import io
 import json
 import logging
+import os
+import re
 import threading
+import time
 import webbrowser
 from pathlib import Path
 
@@ -48,6 +51,30 @@ WHISPER_MODEL_SIZE = "small"
 WHISPER_DEVICE = "cpu"
 WHISPER_COMPUTE_TYPE = "int8"
 WHISPER_LANGUAGE = "tr"
+
+# TTS varsayilanlari — QW-5: tek kaynak. Birincil motor edge oldugundan varsayilan
+# ses de edge sesi olmali (eski "tr_TR-dfki-medium" fallback'i Piper ses adiydi).
+DEFAULT_TTS_VOICE = "tr-TR-EmelNeural"
+
+# Acilis edge erisilebilirlik probu: motor yuklendikten sonra BIR KEZ kucuk bir
+# sentez denenir; basarisizsa motor bastan Piper'a sabitlenir (FallbackEngine'in
+# her istekte edge deneyip timeout beklemesi yerine).
+EDGE_PROBE_TEXT = "merhaba"
+EDGE_PROBE_TIMEOUT_S = 5.0
+
+# /api/session/new sabit selamlamasi — on-isitma ayni metin/jest/yogunluk kullanir
+# ki onbellek anahtarlari birebir isabet etsin.
+SESSION_GREETING_TEXT = 'Merhaba. Sohbet edebiliriz. Oyun için "oyun oynayalım" de.'
+SESSION_GREETING_JEST = "selamlama"
+SESSION_GREETING_YOGUNLUK = 0.8
+
+# game_engine icindeki inline kural/hazirlik metinlerinin birebir kopyalari
+# (game_engine'e dokunmadan). Metin orada degisirse on-isitma sadece iska gecer — hata olmaz.
+KELIME_KURAL_TEXT = ("Kelime türetme oynayalım! Ben bir kelime söylerim. Sen de son "
+                     "harfiyle başlayan yeni bir kelime söyle. Sırayla devam ederiz. "
+                     "Aynı kelimeyi iki kez kullanamayız. Her tur için 20 saniyen var. "
+                     "Hazırsan 'başla' de!")
+HAZIR_BEKLE_TEXT = "Hazır olunca 'başla' de ya da butona dokun :)"
 
 
 def load_config() -> dict:
@@ -106,10 +133,150 @@ class TTSState:
         return self.engine is not None and self.status == "hazir"
 
 
-def _load_tts_async(state: "TTSState", config: dict) -> None:
+def _probe_edge_or_pin_fallback(engine):
+    """Edge'in erisilebilirligini BIR KEZ dener (kucuk sentez, sinirli sure).
+
+    Basarili -> engine aynen doner (mevcut davranis). Basarisiz/timeout -> yedek
+    Piper motoru doner; boylece FallbackEngine her istekte edge'i deneyip timeout
+    beklemez. Yalnizca FallbackEngine (edge+piper) icin anlamlidir.
+    """
+    from tts.engine_base import FallbackEngine
+    if not isinstance(engine, FallbackEngine):
+        return engine
+    result: dict = {}
+
+    def _try():
+        try:
+            result["audio"] = engine.primary.synthesize(EDGE_PROBE_TEXT, None, 0.7)
+        except Exception as e:  # noqa: BLE001 — ag hatasi = prob basarisiz
+            result["error"] = e
+
+    t = threading.Thread(target=_try, daemon=True)
+    t.start()
+    t.join(EDGE_PROBE_TIMEOUT_S)
+    if t.is_alive():
+        log.warning("TTS edge probu %.0fs icinde donmedi — motor Piper'a sabitlendi.",
+                    EDGE_PROBE_TIMEOUT_S)
+        return engine.fallback
+    if result.get("error") is not None or not result.get("audio"):
+        log.warning("TTS edge probu basarisiz (%s) — motor Piper'a sabitlendi.",
+                    result.get("error", "bos ses"))
+        return engine.fallback
+    log.info("TTS edge probu OK (%d bayt).", len(result["audio"]))
+    return engine
+
+
+# Cumle sinirlari: .!?… + bosluk. web/app.js splitSentences ile BIREBIR ayni
+# mantik olmali — on-isitma anahtarlari frontend parcalariyla eslessin.
+_SENT_SPLIT_RE = re.compile(r"(?<=[.!?…])\s+")
+
+
+def _split_sentences_tr(text: str, min_len: int = 10) -> list:
+    """Metni cumle parcalarina boler; kisa parca (<min_len) sonrakiyle birlesir,
+    artan kisa kuyruk son parcaya eklenir. Tek cumlede [metin] doner."""
+    parts = [p.strip() for p in _SENT_SPLIT_RE.split((text or "").strip()) if p.strip()]
+    out = []
+    buf = ""
+    for p in parts:
+        buf = (buf + " " + p) if buf else p
+        if len(buf) >= min_len:
+            out.append(buf)
+            buf = ""
+    if buf:
+        if out:
+            out[-1] += " " + buf
+        else:
+            out.append(buf)
+    return out
+
+
+def _cache_jest(engine, jest_id, yogunluk):
+    """Onbellek anahtarindaki jest bileseni. ElevenLabs motoru KABA duygu imzasi
+    kullanir (benzer jest'ler tek anahtar -> rastgele-jest pre-gen ile uyumlu).
+    Diger motorlar (edge/piper) jest_id'yi oldugu gibi kullanir (mevcut davranis)."""
+    sig_fn = getattr(engine, "cache_signature", None)
+    if sig_fn is None and hasattr(engine, "primary"):   # FallbackEngine -> primary'yi ac
+        sig_fn = getattr(engine.primary, "cache_signature", None)
+    return sig_fn(jest_id, yogunluk) if sig_fn else jest_id
+
+
+def _tts_synth_cached(state: "TTSState", cache, config: dict, text: str,
+                      jest_id=None, yogunluk: float = 0.7):
+    """Onbellek anahtari turetimi + sentez — api_speak ve on-isitma AYNI yolu
+    kullanir (varsayilanlar api_speak ile ayni: jest_id=None, yogunluk=0.7)."""
+    voice = config.get("tts_voice", DEFAULT_TTS_VOICE)
+    key = cache.make_key(text, _cache_jest(state.engine, jest_id, yogunluk), yogunluk, voice)
+    audio = cache.get(key)
+    if audio is None:
+        with state._lock:  # tek model -> seri sentez
+            audio = state.engine.synthesize(text, jest_id, yogunluk)
+        if audio:
+            cache.put(key, audio)
+    return audio
+
+
+def _warm_texts() -> list:
+    """On-isitilacak sabit replikler: (metin, jest_id, yogunluk) uclusu.
+
+    jest/yogunluk degerleri metnin GERCEKTE seslendirildigi payload'larla birebir
+    ayni tutuldu (anahtar isabeti icin). Bilinmeyenlerde api_speak varsayilanlari.
+    """
+    items = []
+    # 1) Guard guvenli-yanit sablonlari (llm_bridge) — jest = sablon anahtari.
+    try:
+        from llm_bridge import _SAFE_RESPONSE_TEMPLATES
+        for jest_key, metin in _SAFE_RESPONSE_TEMPLATES.items():
+            jest = None if jest_key == "sicaklik_default" else jest_key
+            items.append((metin, jest, 0.7))  # yogunluk: api_speak varsayilani
+    except Exception as e:  # noqa: BLE001 — isitma eksik kalsin, sergi calissin
+        log.warning("On-isitma: guvenli sablonlar alinamadi: %s", e)
+    # 2) Sergi selamlamasi (/api/session/new sabiti).
+    items.append((SESSION_GREETING_TEXT, SESSION_GREETING_JEST, SESSION_GREETING_YOGUNLUK))
+    # 3) Oyun kural/hazirlik replikleri (game_engine sabitleri — en sik kullanilanlar).
+    try:
+        from game_engine import _JEST as _GJ, _TXT as _GT
+        items.append((_GT["exit"][0], _GJ["exit"], 0.6))
+        for jest in _GJ.get("kel_intro", []):                     # random.choice ikisini de secebilir
+            items.append((KELIME_KURAL_TEXT, jest, 0.8))          # game.start() = dogrudan kelime kurali
+        items.append((HAZIR_BEKLE_TEXT, "bekle", 0.6))
+    except Exception as e:  # noqa: BLE001
+        log.warning("On-isitma: oyun replikleri alinamadi: %s", e)
+    return items
+
+
+def _warm_tts_cache(state: "TTSState", cache, config: dict) -> None:
+    """Sik sabit metinleri cumle parcalari halinde onbellege isit.
+
+    Frontend (app.js speak) metni cumlelere bolup POST ettigi icin isitma da ayni
+    bolme ile parca parca yapilir. 3 hatadan sonra birakilir (motor coktu demektir).
+    """
+    if cache is None or not getattr(cache, "enabled", False) or not state.is_ready():
+        return
+    hazir = 0
+    hata = 0
+    for metin, jest, yog in _warm_texts():
+        for parca in _split_sentences_tr(metin):
+            if hata >= 3:
+                log.warning("TTS on-isitma birakildi (ust uste hata; %d parca isindi).", hazir)
+                return
+            try:
+                audio = _tts_synth_cached(state, cache, config, parca, jest, yog)
+            except Exception as e:  # noqa: BLE001
+                hata += 1
+                log.warning("TTS on-isitma parca hatasi (%r): %s", parca[:30], e)
+                continue
+            if audio:
+                hazir += 1
+            else:
+                hata += 1
+    log.info("TTS on-isitma tamam: %d parca onbellekte.", hazir)
+
+
+def _load_tts_async(state: "TTSState", config: dict, cache=None) -> None:
     """TTS motorunu arka planda yukler — HTTP yanitlarini geciktirmez.
     use_cuda=False: 4GB VRAM aktif LLM (Ollama) ile dolu; TTS CPU'da kalir
-    (Piper RTF ~0.05, gercek-zamandan cok hizli)."""
+    (Piper RTF ~0.05, gercek-zamandan cok hizli).
+    Yukleme sonrasi (ayni thread): edge erisilebilirlik probu + onbellek on-isitmasi."""
     state.status = "yukleniyor"
     try:
         def _make_piper(voice_key: str):
@@ -126,14 +293,50 @@ def _load_tts_async(state: "TTSState", config: dict) -> None:
             # kesilirse sergi susmasin diye FallbackEngine otomatik gecer.
             from tts.engine_edge import EdgeEngine
             from tts.engine_base import FallbackEngine
-            primary = EdgeEngine(voice=config.get("tts_voice", "tr-TR-EmelNeural"))
+            primary = EdgeEngine(voice=config.get("tts_voice", DEFAULT_TTS_VOICE))
             if config.get("tts_fallback_enabled", True):
-                state.engine = FallbackEngine(primary, _make_piper("tts_fallback_voice"))
-                log.info("TTS hazir (edge=%s + cevrimdisi yedek piper=%s).",
-                         primary.voice_name, state.engine.fallback.voice_name)
+                engine = FallbackEngine(primary, _make_piper("tts_fallback_voice"))
+                # Acilis probu: edge erisilemiyorsa motor BASTAN Piper'a sabitlenir.
+                engine = _probe_edge_or_pin_fallback(engine)
+                state.engine = engine
+                if isinstance(engine, FallbackEngine):
+                    log.info("TTS hazir (edge=%s + cevrimdisi yedek piper=%s).",
+                             primary.voice_name, engine.fallback.voice_name)
+                else:
+                    log.info("TTS hazir (Piper, %s — edge probu basarisiz, motor sabitlendi).",
+                             engine.voice_name)
             else:
                 state.engine = primary
                 log.info("TTS hazir (edge=%s, yedek yok).", primary.voice_name)
+        elif engine_name == "elevenlabs":
+            # Birincil: ElevenLabs (bulut, KOTALI — her sentez kredi harcar).
+            # Yedek zinciri: edge (ucretsiz online) -> Piper (offline). Kredi tavani
+            # dolar ya da anahtar/ag yoksa ElevenLabs b"" doner; FallbackEngine
+            # otomatik ucretsiz yedege gecer (sergi susmaz, butce asilmaz).
+            from tts.engine_elevenlabs import ElevenLabsEngine
+            from tts.engine_edge import EdgeEngine
+            from tts.engine_base import FallbackEngine
+            primary = ElevenLabsEngine(
+                voice=config.get("tts_voice", ""),
+                api_key=(config.get("tts_elevenlabs_api_key")
+                         or os.environ.get("ELEVENLABS_API_KEY", "")),
+                model=config.get("tts_elevenlabs_model", "eleven_flash_v2_5"),
+                language=config.get("tts_elevenlabs_language", "tr"),
+                monthly_cap=config.get("tts_elevenlabs_monthly_credit_cap", 32000),
+                usage_path=BASE_DIR / "tts" / "elevenlabs_usage.json",
+            )
+            if config.get("tts_fallback_enabled", True):
+                # 3 katman: elevenlabs -> edge -> piper.
+                offline = FallbackEngine(
+                    EdgeEngine(voice=config.get("tts_elevenlabs_edge_fallback_voice",
+                                                DEFAULT_TTS_VOICE)),
+                    _make_piper("tts_fallback_voice"))
+                state.engine = FallbackEngine(primary, offline)
+                log.info("TTS hazir (elevenlabs=%s + yedek: edge -> piper).",
+                         primary.voice_name)
+            else:
+                state.engine = primary
+                log.info("TTS hazir (elevenlabs=%s, yedek yok).", primary.voice_name)
         else:
             if engine_name != "piper":
                 log.warning("Bilinmeyen tts_engine '%s' — piper'a dusuluyor.", engine_name)
@@ -144,10 +347,18 @@ def _load_tts_async(state: "TTSState", config: dict) -> None:
         state.status = "hata"
         state.error = str(e)
         log.warning("TTS yuklenemedi: %s", e)
+        return
+    # On-isitma: motor hazir olduktan sonra AYNI arka plan thread'inde —
+    # ilk ziyaretci selamlamayi/menu repliklerini sentez beklemeden duysun.
+    try:
+        _warm_tts_cache(state, cache, config)
+    except Exception as e:  # noqa: BLE001 — isitma hatasi sergiyi durdurmaz
+        log.warning("TTS on-isitma hatasi: %s", e)
 
 
 def create_app(config: dict) -> Flask:
     app = Flask(__name__, static_folder=None)
+    app_start = time.monotonic()  # /api/health uptime_s icin
 
     bridge = LLMBridge(config, BASE_DIR)
     game = GameEngine(bridge=bridge)  # TKM deterministik; kelime turetme (ileride) LLM kullanir
@@ -159,6 +370,8 @@ def create_app(config: dict) -> Flask:
     logger = SessionLogger(log_path, config["ollama_url"], bridge.model)
     logger.start()
     log.info("Oturum logu: %s", log_path)
+    # Oyun baslangic/bitis ozetleri de ayni oturum loguna yazilsin (gozlem).
+    game.session_logger = logger
 
     # Tek seferlik warmup arka planda
     if config.get("warmup_on_start", True):
@@ -188,7 +401,7 @@ def create_app(config: dict) -> Flask:
     if config.get("tts_enabled", True):
         threading.Thread(
             target=_load_tts_async,
-            args=(tts_state, config),
+            args=(tts_state, config, tts_cache),
             daemon=True,
         ).start()
 
@@ -200,10 +413,6 @@ def create_app(config: dict) -> Flask:
     @app.route("/kontrol")
     def control_panel():
         return send_from_directory(str(WEB_DIR), "Kontrol_Paneli.html")
-
-    @app.route("/<path:filename>")
-    def static_files(filename):
-        return send_from_directory(str(WEB_DIR), filename)
 
     @app.get("/api/gestures")
     def api_gestures():
@@ -227,14 +436,33 @@ def create_app(config: dict) -> Flask:
 
     @app.get("/api/health")
     def api_health():
-        return jsonify({"ollama": bridge.is_alive(), "model": bridge.model})
+        """Watchdog/izleme icin: Ollama canli mi + TTS hazir mi + sunucu uptime."""
+        return jsonify({
+            "ollama": bridge.is_alive(),
+            "model": bridge.model,
+            "tts": tts_state.is_ready(),
+            "tts_status": tts_state.status,
+            "uptime_s": round(time.monotonic() - app_start, 1),
+        })
 
     @app.get("/api/config")
     def api_config():
-        """Frontend'in bilmesi gereken sergi sınırları."""
+        """Frontend'in bilmesi gereken sergi sınırları + sesli giriş ayarları."""
         return jsonify({
             "max_user_input_chars": int(config.get("max_user_input_chars", 240)),
             "max_record_seconds": int(config.get("max_record_seconds", 30)),
+            # Sergi ekranindaki surekli sesli giris (VAD) ayarlari. Sergide JS'e
+            # dokunmadan config.json'dan ayarlanabilsin diye burada aciga cikarilir.
+            "voice_input": {
+                "enabled": bool(config.get("voice_input_enabled", True)),
+                "autostart": bool(config.get("voice_input_autostart", True)),
+                "silence_ms": int(config.get("voice_input_silence_ms", 1000)),
+                "min_speech_ms": int(config.get("voice_input_min_speech_ms", 350)),
+                "max_utterance_ms": int(config.get("voice_input_max_utterance_ms", 12000)),
+                "onset_mult": float(config.get("voice_input_onset_mult", 2.2)),
+                "abs_min_rms": float(config.get("voice_input_abs_min_rms", 0.012)),
+                "cooldown_ms": int(config.get("voice_input_cooldown_ms", 400)),
+            },
         })
 
     @app.get("/api/models")
@@ -292,9 +520,18 @@ def create_app(config: dict) -> Flask:
         result = bridge.request(text)
         if result is None or "error" in result:
             err = (result or {}).get("error", "no_response")
-            meta = (result or {}).get("meta", {})
+            meta = dict((result or {}).get("meta") or {})
             logger.log_error(text, result or {"error": err})
-            return jsonify({"error": err, "meta": meta}), 500
+            # Sergi dayanikliligi: 500 yerine HTTP 200 + nazik "bekle" yaniti.
+            # Kiosk hata kutusu gostermez; ziyaretci dogal bir cevap duyar/gorur.
+            # 'bekle' jesti gestures.json'da mevcut (donen ibre — saat).
+            meta.update({"degraded": True, "error": err})
+            return jsonify({
+                "yanit": "Şu an düşünemiyorum, birazdan tekrar dener misin?",
+                "jest_id": "bekle",
+                "yogunluk": 0.4,
+                "meta": meta,
+            })
         logger.log_request(text, result)
         return jsonify(result)
 
@@ -304,12 +541,32 @@ def create_app(config: dict) -> Flask:
         logger.log_event("Konusma gecmisi sifirlandi")
         return jsonify({"ok": True})
 
-    # ——— Oyun modu (deterministik; TKM icin LLM cagrilmaz) ————————
+    @app.post("/api/session/new")
+    def api_session_new():
+        """Yeni ziyaretci selami: sohbet gecmisini ve oyun durumunu temizle.
+
+        Bu akista LLM'e gidilmez; karsilama sabit kalir ki kiosk her ziyaretciye
+        temiz ve hizli bir acilis yapsin.
+        """
+        bridge.clear_history()
+        with game_lock:
+            game.exit()
+        logger.log_event("Yeni ziyaretci: selamlama ile temiz oturum")
+        return jsonify({
+            "ok": True,
+            "jest_id": SESSION_GREETING_JEST,
+            "yogunluk": SESSION_GREETING_YOGUNLUK,
+            "yanit": SESSION_GREETING_TEXT,   # on-isitma ile ayni sabit (anahtar isabeti)
+            "phase": "idle",
+            "buttons": [],
+        })
+
+    # ——— Oyun modu (Kelime Türetme; deterministik akis, AI kelimeleri temali havuzdan) ————
     @app.post("/api/game/start")
     def api_game_start():
         with game_lock:
             result = game.start()
-        logger.log_event("Oyun baslatildi (menu)")
+        logger.log_event("Oyun baslatildi (kelime turetme)")
         return jsonify(result)
 
     @app.post("/api/game/input")
@@ -428,7 +685,7 @@ def create_app(config: dict) -> Flask:
             "ready": tts_state.is_ready(),
             "error": tts_state.error,
             "engine": config.get("tts_engine", "piper"),
-            "voice": config.get("tts_voice", "tr_TR-dfki-medium"),
+            "voice": config.get("tts_voice", DEFAULT_TTS_VOICE),  # QW-5: edge varsayilani
             "enabled": bool(config.get("tts_enabled", True)),
             "autoplay": bool(config.get("tts_autoplay", True)),
         })
@@ -458,22 +715,21 @@ def create_app(config: dict) -> Flask:
                 "detail": tts_state.error,
             }), 503
 
-        voice = config.get("tts_voice", "tr_TR-dfki-medium")
-        key = tts_cache.make_key(text, jest_id, yogunluk, voice)
-        audio = tts_cache.get(key)
-        if audio is None:
-            try:
-                with tts_state._lock:  # tek model -> seri sentez
-                    audio = tts_state.engine.synthesize(text, jest_id, yogunluk)
-            except Exception as e:  # noqa: BLE001
-                log.warning("TTS sentez hatasi: %s", e)
-                return jsonify({"error": "tts_failed", "detail": str(e)}), 500
-            if audio:
-                tts_cache.put(key, audio)
+        # Anahtar turetimi + sentez ortak yardimcida — on-isitma da AYNI yolu kullanir.
+        try:
+            audio = _tts_synth_cached(tts_state, tts_cache, config, text, jest_id, yogunluk)
+        except Exception as e:  # noqa: BLE001
+            log.warning("TTS sentez hatasi: %s", e)
+            return jsonify({"error": "tts_failed", "detail": str(e)}), 500
         if not audio:
             return jsonify({"error": "tts_empty"}), 500
         return Response(audio, mimetype="audio/wav",
                         headers={"Cache-Control": "no-store"})
+
+    @app.route("/<path:filename>")
+    def static_files(filename):
+        # API yollari yukaridaki net route'larda kalmali; catch-all sadece web dosyalari icin.
+        return send_from_directory(str(WEB_DIR), filename)
 
     # CORS: sadece localhost; basit acik politika (tek bilgisayar)
     @app.after_request

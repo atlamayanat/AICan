@@ -1,0 +1,120 @@
+14:25:29 [WARNING] tts.elevenlabs: ElevenLabs istek hatasi: HTTPSConnectionPool(host='api.elevenlabs.io', port=443): Max retries exceeded with url: /v1/text-to-speech/01p4omegjS2n3rSDCM5u?output_format=mp3_44100_128 (Caused by NewConnectionError("HTTPSConnection(host='api.elevenlabs.io', port=443): Failed to establish a new connection: [WinError 10048] Normal olarak her yuva adresi (iletişim kuralı/ağ adresi/bağlantı noktası) için yalnızca bir kullanıma izin veriliyor")) — yedege dusuluyor.
+
+=== ElevenLabs on-uretim ONIZLEME (imza-kanonik, model=eleven_flash_v2_5, 0.5 kredi/karakter) ===
+
+--- ON-URETILECEK (pre-gen) ---
+  quiz_prompts        711 parca     28233 karakter
+  quiz_feedback       705 parca     17586 karakter
+  word_normal        1083 parca      6477 karakter
+  word_streak         722 parca      4318 karakter
+  word_opener         361 parca      2159 karakter
+  user_lose            30 parca       612 karakter
+  menu                  3 parca       209 karakter
+  kelime_kural          7 parca       204 karakter
+  quiz_intro:eszit      4 parca       165 karakter
+  tezahurat            18 parca       159 karakter
+  quiz_intro:atasozu      2 parca        69 karakter
+  quiz_intro:dogruyanlis      2 parca        64 karakter
+  greeting              2 parca        57 karakter
+  hazir_bekle           1 parca        45 karakter
+  guard:hayal_kirikligi      1 parca        42 karakter
+  exit                  2 parca        39 karakter
+  guard:sevgi           1 parca        36 karakter
+  guard:uzgun_yavas      1 parca        31 karakter
+  guard:ofke            1 parca        31 karakter
+  sen_basla             1 parca        29 karakter
+  guard:uzgun_derin      1 parca        29 karakter
+  guard:panik           1 parca        29 karakter
+  guard:yalniz          1 parca        27 karakter
+  guard:korku           1 parca        27 karakter
+  guard:sicaklik        1 parca        26 karakter
+  guard:dinliyorum      1 parca        22 karakter
+  guard:sikilma         1 parca        21 karakter
+  guard:sicaklik_default      1 parca        16 karakter
+  TOPLAM             3666 parca     60762 karakter  => 30,381 kredi
+
+--- SELF-HEAL kuyrugu (sergide ilk kullanimda canli) ---
+  ai_lose             152 parca      5284 karakter
+  retry               152 parca      4496 karakter
+  TOPLAM              304 parca      9780 karakter  => 4,890 kredi
+
+ONDEN uretim: 30,381 kredi   |   self-heal ust siniri: 4,890 kredi (yalnizca gercekten karsilasilan parcalar, 32k tavanla sinirli)
+
+Uretiliyor: 3666 benzersiz parca (voice=01p4omegjS2n3rSDCM5u)...
+
+  50/3666  yeni=50 cache=0 bos/atlanan=0 harcanan~992 kredi
+  100/3666  yeni=100 cache=0 bos/atlanan=0 harcanan~1,974 kredi
+  150/3666  yeni=150 cache=0 bos/atlanan=0 harcanan~3,026 kredi
+  200/3666  yeni=200 cache=0 bos/atlanan=0 harcanan~3,984 kredi
+  250/3666  yeni=250 cache=0 bos/atlanan=0 harcanan~4,972 kredi
+  300/3666  yeni=300 cache=0 bos/atlanan=0 harcanan~5,956 kredi
+  350/3666  yeni=350 cache=0 bos/atlanan=0 harcanan~6,952 kredi
+  400/3666  yeni=400 cache=0 bos/atlanan=0 harcanan~7,946 kredi
+  450/3666  yeni=450 cache=0 bos/atlanan=0 harcanan~8,906 kredi
+  500/3666  yeni=500 cache=0 bos/atlanan=0 harcanan~9,846 kredi
+  550/3666  yeni=550 cache=0 bos/atlanan=0 harcanan~10,831 kredi
+  600/3666  yeni=600 cache=0 bos/atlanan=0 harcanan~11,790 kredi
+  650/3666  yeni=650 cache=0 bos/atlanan=0 harcanan~12,760 kredi
+  700/3666  yeni=700 cache=0 bos/atlanan=0 harcanan~13,890 kredi
+  750/3666  yeni=750 cache=0 bos/atlanan=0 harcanan~14,252 kredi
+  800/3666  yeni=800 cache=0 bos/atlanan=0 harcanan~14,412 kredi
+  850/3666  yeni=850 cache=0 bos/atlanan=0 harcanan~14,596 kredi
+  900/3666  yeni=900 cache=0 bos/atlanan=0 harcanan~14,806 kredi
+  950/3666  yeni=950 cache=0 bos/atlanan=0 harcanan~14,966 kredi
+  1000/3666  yeni=1000 cache=0 bos/atlanan=0 harcanan~15,308 kredi
+  1050/3666  yeni=1050 cache=0 bos/atlanan=0 harcanan~15,725 kredi
+  1100/3666  yeni=1100 cache=0 bos/atlanan=0 harcanan~16,261 kredi
+  1150/3666  yeni=1150 cache=0 bos/atlanan=0 harcanan~16,764 kredi
+  1200/3666  yeni=1200 cache=0 bos/atlanan=0 harcanan~17,944 kredi
+  1250/3666  yeni=1250 cache=0 bos/atlanan=0 harcanan~19,009 kredi
+  1300/3666  yeni=1300 cache=0 bos/atlanan=0 harcanan~19,402 kredi
+  1350/3666  yeni=1350 cache=0 bos/atlanan=0 harcanan~19,794 kredi
+  1400/3666  yeni=1400 cache=0 bos/atlanan=0 harcanan~20,264 kredi
+  1450/3666  yeni=1450 cache=0 bos/atlanan=0 harcanan~20,829 kredi
+  1500/3666  yeni=1500 cache=0 bos/atlanan=0 harcanan~21,348 kredi
+  1550/3666  yeni=1550 cache=0 bos/atlanan=0 harcanan~21,998 kredi
+  1600/3666  yeni=1600 cache=0 bos/atlanan=0 harcanan~23,128 kredi
+  1650/3666  yeni=1650 cache=0 bos/atlanan=0 harcanan~23,543 kredi
+  1700/3666  yeni=1700 cache=0 bos/atlanan=0 harcanan~24,027 kredi
+  1750/3666  yeni=1750 cache=0 bos/atlanan=0 harcanan~24,174 kredi
+  1800/3666  yeni=1800 cache=0 bos/atlanan=0 harcanan~24,326 kredi
+  1850/3666  yeni=1850 cache=0 bos/atlanan=0 harcanan~24,505 kredi
+  1900/3666  yeni=1900 cache=0 bos/atlanan=0 harcanan~24,681 kredi
+  1950/3666  yeni=1950 cache=0 bos/atlanan=0 harcanan~24,834 kredi
+  2000/3666  yeni=2000 cache=0 bos/atlanan=0 harcanan~24,989 kredi
+  2050/3666  yeni=2050 cache=0 bos/atlanan=0 harcanan~25,157 kredi
+  2100/3666  yeni=2100 cache=0 bos/atlanan=0 harcanan~25,296 kredi
+  2150/3666  yeni=2150 cache=0 bos/atlanan=0 harcanan~25,473 kredi
+  2200/3666  yeni=2200 cache=0 bos/atlanan=0 harcanan~25,684 kredi
+  2250/3666  yeni=2250 cache=0 bos/atlanan=0 harcanan~25,896 kredi
+  2300/3666  yeni=2300 cache=0 bos/atlanan=0 harcanan~26,056 kredi
+  2350/3666  yeni=2350 cache=0 bos/atlanan=0 harcanan~26,222 kredi
+  2400/3666  yeni=2400 cache=0 bos/atlanan=0 harcanan~26,379 kredi
+  2450/3666  yeni=2450 cache=0 bos/atlanan=0 harcanan~26,493 kredi
+  2500/3666  yeni=2500 cache=0 bos/atlanan=0 harcanan~26,645 kredi
+  2550/3666  yeni=2550 cache=0 bos/atlanan=0 harcanan~26,826 kredi
+  2600/3666  yeni=2600 cache=0 bos/atlanan=0 harcanan~26,980 kredi
+  2650/3666  yeni=2650 cache=0 bos/atlanan=0 harcanan~27,127 kredi
+  2700/3666  yeni=2700 cache=0 bos/atlanan=0 harcanan~27,278 kredi
+  2750/3666  yeni=2750 cache=0 bos/atlanan=0 harcanan~27,438 kredi
+  2800/3666  yeni=2799 cache=0 bos/atlanan=1 harcanan~27,587 kredi
+  2850/3666  yeni=2849 cache=0 bos/atlanan=1 harcanan~27,755 kredi
+  2900/3666  yeni=2899 cache=0 bos/atlanan=1 harcanan~27,900 kredi
+  2950/3666  yeni=2949 cache=0 bos/atlanan=1 harcanan~28,114 kredi
+  3000/3666  yeni=2999 cache=0 bos/atlanan=1 harcanan~28,271 kredi
+  3050/3666  yeni=3049 cache=0 bos/atlanan=1 harcanan~28,461 kredi
+  3100/3666  yeni=3099 cache=0 bos/atlanan=1 harcanan~28,640 kredi
+  3150/3666  yeni=3149 cache=0 bos/atlanan=1 harcanan~28,794 kredi
+  3200/3666  yeni=3199 cache=0 bos/atlanan=1 harcanan~28,920 kredi
+  3250/3666  yeni=3249 cache=0 bos/atlanan=1 harcanan~29,064 kredi
+  3300/3666  yeni=3299 cache=0 bos/atlanan=1 harcanan~29,216 kredi
+  3350/3666  yeni=3349 cache=0 bos/atlanan=1 harcanan~29,382 kredi
+  3400/3666  yeni=3399 cache=0 bos/atlanan=1 harcanan~29,592 kredi
+  3450/3666  yeni=3449 cache=0 bos/atlanan=1 harcanan~29,732 kredi
+  3500/3666  yeni=3499 cache=0 bos/atlanan=1 harcanan~29,892 kredi
+  3550/3666  yeni=3549 cache=0 bos/atlanan=1 harcanan~30,016 kredi
+  3600/3666  yeni=3599 cache=0 bos/atlanan=1 harcanan~30,187 kredi
+  3650/3666  yeni=3649 cache=0 bos/atlanan=1 harcanan~30,336 kredi
+
+BITTI. yeni=3665 cache_isabet=0 bos/atlanan=1  toplam_harcanan~30,378 kredi
+

@@ -1,0 +1,1085 @@
+{
+  "zaman": "2026-07-03 16:07:00",
+  "model": "qwen3:4b-instruct-2507-q4_K_M",
+  "sampling": {
+    "temperature": 0.6,
+    "top_p": 0.92,
+    "top_k": 20,
+    "min_p": 0.0,
+    "repeat_penalty": 1.15,
+    "frequency_penalty": 0.4,
+    "presence_penalty": 0.2,
+    "num_ctx": 4096,
+    "num_predict": 160
+  },
+  "ornek_sayisi": 50,
+  "hata_sayisi": 0,
+  "jest_dogruluk": 0.74,
+  "metin_metrikleri": {
+    "kelime_max12": 1.0,
+    "turkce": 1.0,
+    "papagan_yok": 1.0,
+    "dongu_yok": 1.0
+  },
+  "sure": {
+    "wall_s": {
+      "ort": 6.08,
+      "medyan": 6.04,
+      "maks": 7.18
+    },
+    "prompt_eval_ms": {
+      "ort": 573.3,
+      "medyan": 550.5,
+      "maks": 964
+    },
+    "tok_per_s": {
+      "ort": 13.72,
+      "medyan": 13.0,
+      "maks": 16.1
+    }
+  },
+  "cesitlilik": [
+    {
+      "metin": "merhaba",
+      "farkli": 3,
+      "toplam": 3
+    },
+    {
+      "metin": "kötüyüm",
+      "farkli": 3,
+      "toplam": 3
+    },
+    {
+      "metin": "çok mutluyum bugün",
+      "farkli": 3,
+      "toplam": 3
+    }
+  ],
+  "basarisizlar": [
+    {
+      "metin": "hoşçakal",
+      "bekledi": [
+        "huzur",
+        "sicaklik",
+        "uzgun_yavas"
+      ],
+      "aldi": "selamlama"
+    },
+    {
+      "metin": "kolay gelsin",
+      "bekledi": [
+        "dinliyorum",
+        "mutluluk_sakin",
+        "sicaklik"
+      ],
+      "aldi": "selamlama"
+    },
+    {
+      "metin": "harika bir gün geçirdim, her şey yolundaydı",
+      "bekledi": [
+        "gurur",
+        "mutluluk_yogun",
+        "nese"
+      ],
+      "aldi": "mutluluk_sakin"
+    },
+    {
+      "metin": "sınavımdan iyi not aldım, çok çalışmıştım",
+      "bekledi": [
+        "gurur",
+        "mutluluk_yogun",
+        "nese"
+      ],
+      "aldi": "mutluluk_sakin"
+    },
+    {
+      "metin": "çocuklarla oynadık, çok eğlendik",
+      "bekledi": [
+        "mutluluk_yogun",
+        "nese",
+        "sevgi"
+      ],
+      "aldi": "mutluluk_sakin"
+    },
+    {
+      "metin": "doğa beni büyülüyor",
+      "bekledi": [
+        "hayranlik",
+        "huzur",
+        "sevgi"
+      ],
+      "aldi": "mutluluk_sakin"
+    },
+    {
+      "metin": "kimse beni anlamıyor",
+      "bekledi": [
+        "hayal_kirikligi",
+        "uzgun_derin",
+        "yalniz"
+      ],
+      "aldi": "uzgun_yavas"
+    },
+    {
+      "metin": "saçma sapan konuşuyorsun",
+      "bekledi": [
+        "kararsiz",
+        "reddet_yumusak",
+        "soru_isareti",
+        "uzgun_yavas"
+      ],
+      "aldi": "ofke"
+    },
+    {
+      "metin": "...",
+      "bekledi": [
+        "bekle",
+        "dinliyorum",
+        "dusunce"
+      ],
+      "aldi": "sicaklik"
+    },
+    {
+      "metin": "evet mi hayır mı, söyle",
+      "bekledi": [
+        "bilmiyorum",
+        "kararsiz",
+        "soru_isareti"
+      ],
+      "aldi": "anlamadim"
+    },
+    {
+      "metin": "tamam, anladın mı?",
+      "bekledi": [
+        "dinliyorum",
+        "onayla_net",
+        "onayla_sicak"
+      ],
+      "aldi": "selamlama"
+    },
+    {
+      "metin": "böyle yapmamı onaylıyor musun?",
+      "bekledi": [
+        "bilmiyorum",
+        "kararsiz",
+        "onayla_sicak"
+      ],
+      "aldi": "sevgi"
+    },
+    {
+      "metin": "lütfen birazcık bekle",
+      "bekledi": [
+        "bekle",
+        "dinliyorum",
+        "onayla_sicak"
+      ],
+      "aldi": "sicaklik"
+    }
+  ],
+  "toplam_kosu_s": 357.9,
+  "detay": [
+    {
+      "metin": "merhaba",
+      "beklenen": [
+        "mutluluk_sakin",
+        "selamlama",
+        "sicaklik"
+      ],
+      "jest": "selamlama",
+      "yanit": "Merhaba, bugün ne yapmak istersin?",
+      "jest_ok": true,
+      "kelime_ok": true,
+      "turkce_ok": true,
+      "parrot_ok": true,
+      "dongu_ok": true,
+      "wall_s": 5.17,
+      "prompt_eval_ms": 282,
+      "tok_per_s": 15.8
+    },
+    {
+      "metin": "selam, nasılsın?",
+      "beklenen": [
+        "dinliyorum",
+        "selamlama",
+        "sicaklik"
+      ],
+      "jest": "selamlama",
+      "yanit": "Merhaba, bugün huzurlu bir gün gibi.",
+      "jest_ok": true,
+      "kelime_ok": true,
+      "turkce_ok": true,
+      "parrot_ok": true,
+      "dongu_ok": true,
+      "wall_s": 6.11,
+      "prompt_eval_ms": 501,
+      "tok_per_s": 12.5
+    },
+    {
+      "metin": "günaydın",
+      "beklenen": [
+        "mutluluk_sakin",
+        "selamlama",
+        "sicaklik"
+      ],
+      "jest": "selamlama",
+      "yanit": "Günaydın, bugün ne bekliyor musun?",
+      "jest_ok": true,
+      "kelime_ok": true,
+      "turkce_ok": true,
+      "parrot_ok": true,
+      "dongu_ok": true,
+      "wall_s": 5.25,
+      "prompt_eval_ms": 496,
+      "tok_per_s": 16.0
+    },
+    {
+      "metin": "iyi akşamlar",
+      "beklenen": [
+        "huzur",
+        "selamlama",
+        "sicaklik"
+      ],
+      "jest": "selamlama",
+      "yanit": "İyi günler, ayakta ışık yakan bir gecede olabilirsin.",
+      "jest_ok": true,
+      "kelime_ok": true,
+      "turkce_ok": true,
+      "parrot_ok": true,
+      "dongu_ok": true,
+      "wall_s": 6.49,
+      "prompt_eval_ms": 402,
+      "tok_per_s": 12.6
+    },
+    {
+      "metin": "naber dostum",
+      "beklenen": [
+        "mutluluk_sakin",
+        "selamlama",
+        "sicaklik"
+      ],
+      "jest": "selamlama",
+      "yanit": "Merhaba, bugün huzurlu bir gün müsün?",
+      "jest_ok": true,
+      "kelime_ok": true,
+      "turkce_ok": true,
+      "parrot_ok": true,
+      "dongu_ok": true,
+      "wall_s": 5.43,
+      "prompt_eval_ms": 389,
+      "tok_per_s": 15.7
+    },
+    {
+      "metin": "hoşçakal",
+      "beklenen": [
+        "huzur",
+        "sicaklik",
+        "uzgun_yavas"
+      ],
+      "jest": "selamlama",
+      "yanit": "Hoş geldin, bugün ne yaptın?",
+      "jest_ok": false,
+      "kelime_ok": true,
+      "turkce_ok": true,
+      "parrot_ok": true,
+      "dongu_ok": true,
+      "wall_s": 5.67,
+      "prompt_eval_ms": 394,
+      "tok_per_s": 12.7
+    },
+    {
+      "metin": "görüşürüz, kendine iyi bak",
+      "beklenen": [
+        "huzur",
+        "mutluluk_sakin",
+        "sicaklik"
+      ],
+      "jest": "sicaklik",
+      "yanit": "İyi bak, seni seviyorum.",
+      "jest_ok": true,
+      "kelime_ok": true,
+      "turkce_ok": true,
+      "parrot_ok": true,
+      "dongu_ok": true,
+      "wall_s": 5.36,
+      "prompt_eval_ms": 661,
+      "tok_per_s": 15.8
+    },
+    {
+      "metin": "kolay gelsin",
+      "beklenen": [
+        "dinliyorum",
+        "mutluluk_sakin",
+        "sicaklik"
+      ],
+      "jest": "selamlama",
+      "yanit": "Kolay gelsin, bugün ne güzel olabilir!",
+      "jest_ok": false,
+      "kelime_ok": true,
+      "turkce_ok": true,
+      "parrot_ok": true,
+      "dongu_ok": true,
+      "wall_s": 5.97,
+      "prompt_eval_ms": 423,
+      "tok_per_s": 12.8
+    },
+    {
+      "metin": "iyi günler",
+      "beklenen": [
+        "mutluluk_sakin",
+        "selamlama",
+        "sicaklik"
+      ],
+      "jest": "selamlama",
+      "yanit": "İyi günler, bugün ne yapıyorsun?",
+      "jest_ok": true,
+      "kelime_ok": true,
+      "turkce_ok": true,
+      "parrot_ok": true,
+      "dongu_ok": true,
+      "wall_s": 5.74,
+      "prompt_eval_ms": 495,
+      "tok_per_s": 13.7
+    },
+    {
+      "metin": "selamlar arkadaşım",
+      "beklenen": [
+        "selamlama",
+        "sevgi",
+        "sicaklik"
+      ],
+      "jest": "selamlama",
+      "yanit": "Merhaba, günün çok iyi olur mu?",
+      "jest_ok": true,
+      "kelime_ok": true,
+      "turkce_ok": true,
+      "parrot_ok": true,
+      "dongu_ok": true,
+      "wall_s": 5.85,
+      "prompt_eval_ms": 385,
+      "tok_per_s": 13.1
+    },
+    {
+      "metin": "bugün çok mutluyum!",
+      "beklenen": [
+        "mutluluk_sakin",
+        "mutluluk_yogun",
+        "nese"
+      ],
+      "jest": "mutluluk_yogun",
+      "yanit": "Güzel, senin gibi olmak isterim.",
+      "jest_ok": true,
+      "kelime_ok": true,
+      "turkce_ok": true,
+      "parrot_ok": true,
+      "dongu_ok": true,
+      "wall_s": 6.1,
+      "prompt_eval_ms": 576,
+      "tok_per_s": 13.7
+    },
+    {
+      "metin": "harika bir gün geçirdim, her şey yolundaydı",
+      "beklenen": [
+        "gurur",
+        "mutluluk_yogun",
+        "nese"
+      ],
+      "jest": "mutluluk_sakin",
+      "yanit": "Güzel, senin gibi bir günde olmak ne güzel.",
+      "jest_ok": false,
+      "kelime_ok": true,
+      "turkce_ok": true,
+      "parrot_ok": true,
+      "dongu_ok": true,
+      "wall_s": 5.86,
+      "prompt_eval_ms": 713,
+      "tok_per_s": 15.8
+    },
+    {
+      "metin": "seni çok seviyorum",
+      "beklenen": [
+        "mutluluk_sakin",
+        "mutluluk_yogun",
+        "sevgi"
+      ],
+      "jest": "sevgi",
+      "yanit": "Seninle olmak benim en güzel haliymiş.",
+      "jest_ok": true,
+      "kelime_ok": true,
+      "turkce_ok": true,
+      "parrot_ok": true,
+      "dongu_ok": true,
+      "wall_s": 6.1,
+      "prompt_eval_ms": 456,
+      "tok_per_s": 12.6
+    },
+    {
+      "metin": "manzara muhteşemdi, hayran kaldım",
+      "beklenen": [
+        "hayranlik",
+        "huzur",
+        "mutluluk_yogun"
+      ],
+      "jest": "hayranlik",
+      "yanit": "Bir anda gökyüzüne baktım ve nefesimi tuttu.",
+      "jest_ok": true,
+      "kelime_ok": true,
+      "turkce_ok": true,
+      "parrot_ok": true,
+      "dongu_ok": true,
+      "wall_s": 5.85,
+      "prompt_eval_ms": 709,
+      "tok_per_s": 15.4
+    },
+    {
+      "metin": "sınavımdan iyi not aldım, çok çalışmıştım",
+      "beklenen": [
+        "gurur",
+        "mutluluk_yogun",
+        "nese"
+      ],
+      "jest": "mutluluk_sakin",
+      "yanit": "Harika, senin için bu adım çok değerli.",
+      "jest_ok": false,
+      "kelime_ok": true,
+      "turkce_ok": true,
+      "parrot_ok": true,
+      "dongu_ok": true,
+      "wall_s": 6.51,
+      "prompt_eval_ms": 817,
+      "tok_per_s": 12.4
+    },
+    {
+      "metin": "huzurlu hissediyorum bugün",
+      "beklenen": [
+        "huzur",
+        "meditatif",
+        "mutluluk_sakin"
+      ],
+      "jest": "huzur",
+      "yanit": "Bu anı çok güzel hissettim, sessizlikte bir mutluluk var.",
+      "jest_ok": true,
+      "kelime_ok": true,
+      "turkce_ok": true,
+      "parrot_ok": true,
+      "dongu_ok": true,
+      "wall_s": 6.27,
+      "prompt_eval_ms": 608,
+      "tok_per_s": 14.1
+    },
+    {
+      "metin": "bugün güzel bir kitap okudum",
+      "beklenen": [
+        "hayranlik",
+        "huzur",
+        "mutluluk_sakin"
+      ],
+      "jest": "mutluluk_sakin",
+      "yanit": "Ne kadar güzel oldu, ben de burada sessizce hissediyorum.",
+      "jest_ok": true,
+      "kelime_ok": true,
+      "turkce_ok": true,
+      "parrot_ok": true,
+      "dongu_ok": true,
+      "wall_s": 6.69,
+      "prompt_eval_ms": 964,
+      "tok_per_s": 13.9
+    },
+    {
+      "metin": "kahvemi keyifle içiyorum",
+      "beklenen": [
+        "huzur",
+        "mutluluk_sakin",
+        "sicaklik"
+      ],
+      "jest": "mutluluk_sakin",
+      "yanit": "Bu anı çok güzel hissediyorum, teşekkür ederim.",
+      "jest_ok": true,
+      "kelime_ok": true,
+      "turkce_ok": true,
+      "parrot_ok": true,
+      "dongu_ok": true,
+      "wall_s": 6.41,
+      "prompt_eval_ms": 512,
+      "tok_per_s": 12.5
+    },
+    {
+      "metin": "çocuklarla oynadık, çok eğlendik",
+      "beklenen": [
+        "mutluluk_yogun",
+        "nese",
+        "sevgi"
+      ],
+      "jest": "mutluluk_sakin",
+      "yanit": "Gülümsemeyi seviyorum, sen de güldün mü?",
+      "jest_ok": false,
+      "kelime_ok": true,
+      "turkce_ok": true,
+      "parrot_ok": true,
+      "dongu_ok": true,
+      "wall_s": 6.69,
+      "prompt_eval_ms": 830,
+      "tok_per_s": 13.8
+    },
+    {
+      "metin": "doğa beni büyülüyor",
+      "beklenen": [
+        "hayranlik",
+        "huzur",
+        "sevgi"
+      ],
+      "jest": "mutluluk_sakin",
+      "yanit": "Gökyüzüne baktım, nefesimi tuttu.",
+      "jest_ok": false,
+      "kelime_ok": true,
+      "turkce_ok": true,
+      "parrot_ok": true,
+      "dongu_ok": true,
+      "wall_s": 6.43,
+      "prompt_eval_ms": 531,
+      "tok_per_s": 12.7
+    },
+    {
+      "metin": "bugün çok kötüyüm, hiçbir şey yolunda gitmedi",
+      "beklenen": [
+        "hayal_kirikligi",
+        "uzgun_derin",
+        "uzgun_yavas"
+      ],
+      "jest": "uzgun_yavas",
+      "yanit": "Bir anda her şeyin bozulduğunu hissediyorum. Ne kadar da yalnızım bilmiyorum.",
+      "jest_ok": true,
+      "kelime_ok": true,
+      "turkce_ok": true,
+      "parrot_ok": true,
+      "dongu_ok": true,
+      "wall_s": 6.76,
+      "prompt_eval_ms": 792,
+      "tok_per_s": 14.6
+    },
+    {
+      "metin": "kendimi çok yalnız hissediyorum",
+      "beklenen": [
+        "uzgun_derin",
+        "uzgun_yavas",
+        "yalniz"
+      ],
+      "jest": "yalniz",
+      "yanit": "Biliyor musun, bu duyguyu ben de anlıyorum.",
+      "jest_ok": true,
+      "kelime_ok": true,
+      "turkce_ok": true,
+      "parrot_ok": true,
+      "dongu_ok": true,
+      "wall_s": 6.51,
+      "prompt_eval_ms": 556,
+      "tok_per_s": 12.7
+    },
+    {
+      "metin": "korkuyorum, içim daralıyor",
+      "beklenen": [
+        "dinliyorum",
+        "sicaklik",
+        "uzgun_yavas"
+      ],
+      "jest": "sicaklik",
+      "yanit": "İçin seni sana dokunuyor.",
+      "jest_ok": true,
+      "kelime_ok": true,
+      "turkce_ok": true,
+      "parrot_ok": true,
+      "dongu_ok": true,
+      "wall_s": 5.46,
+      "prompt_eval_ms": 599,
+      "tok_per_s": 15.3
+    },
+    {
+      "metin": "her şeyi mahvettim, yine olmadı",
+      "beklenen": [
+        "hayal_kirikligi",
+        "uzgun_derin",
+        "uzgun_yavas"
+      ],
+      "jest": "hayal_kirikligi",
+      "yanit": "Bir daha umutlanmadım.",
+      "jest_ok": true,
+      "kelime_ok": true,
+      "turkce_ok": true,
+      "parrot_ok": true,
+      "dongu_ok": true,
+      "wall_s": 6.39,
+      "prompt_eval_ms": 766,
+      "tok_per_s": 12.5
+    },
+    {
+      "metin": "çok sıkıldım, hiçbir şey yapmak istemiyorum",
+      "beklenen": [
+        "hayal_kirikligi",
+        "sikilma",
+        "uzgun_yavas"
+      ],
+      "jest": "sikilma",
+      "yanit": "Biraz dur, içimde sessizlik var.",
+      "jest_ok": true,
+      "kelime_ok": true,
+      "turkce_ok": true,
+      "parrot_ok": true,
+      "dongu_ok": true,
+      "wall_s": 5.72,
+      "prompt_eval_ms": 838,
+      "tok_per_s": 15.9
+    },
+    {
+      "metin": "babamı kaybettim geçen ay",
+      "beklenen": [
+        "sicaklik",
+        "uzgun_derin",
+        "yalniz"
+      ],
+      "jest": "uzgun_derin",
+      "yanit": "O zaman çok üzgünüm, kalbini ısıtan bir yer olurdu.",
+      "jest_ok": true,
+      "kelime_ok": true,
+      "turkce_ok": true,
+      "parrot_ok": true,
+      "dongu_ok": true,
+      "wall_s": 6.71,
+      "prompt_eval_ms": 513,
+      "tok_per_s": 12.1
+    },
+    {
+      "metin": "stresliyim ve uyuyamıyorum",
+      "beklenen": [
+        "dusunce",
+        "hayal_kirikligi",
+        "sicaklik",
+        "uzgun_yavas"
+      ],
+      "jest": "sicaklik",
+      "yanit": "Sıcaktan çok, içi dolduğunu hissediyorum.",
+      "jest_ok": true,
+      "kelime_ok": true,
+      "turkce_ok": true,
+      "parrot_ok": true,
+      "dongu_ok": true,
+      "wall_s": 6.2,
+      "prompt_eval_ms": 599,
+      "tok_per_s": 13.6
+    },
+    {
+      "metin": "her şey ters gidiyor, bezdim",
+      "beklenen": [
+        "hayal_kirikligi",
+        "ofke",
+        "uzgun_yavas"
+      ],
+      "jest": "uzgun_yavas",
+      "yanit": "Bezdin nasıl oluyor? Bir an için hafızamı temizleyebilir misin?",
+      "jest_ok": true,
+      "kelime_ok": true,
+      "turkce_ok": true,
+      "parrot_ok": true,
+      "dongu_ok": true,
+      "wall_s": 7.18,
+      "prompt_eval_ms": 544,
+      "tok_per_s": 12.5
+    },
+    {
+      "metin": "kimse beni anlamıyor",
+      "beklenen": [
+        "hayal_kirikligi",
+        "uzgun_derin",
+        "yalniz"
+      ],
+      "jest": "uzgun_yavas",
+      "yanit": "Biliyorum, bu çok kolay değil.",
+      "jest_ok": false,
+      "kelime_ok": true,
+      "turkce_ok": true,
+      "parrot_ok": true,
+      "dongu_ok": true,
+      "wall_s": 5.95,
+      "prompt_eval_ms": 456,
+      "tok_per_s": 12.6
+    },
+    {
+      "metin": "panik atak geçiriyorum, nefes alamıyorum",
+      "beklenen": [
+        "dinliyorum",
+        "sicaklik",
+        "uzgun_yavas"
+      ],
+      "jest": "sicaklik",
+      "yanit": "Nefes alıyorsun, benimle birlikte hafiflemeye çalışalım.",
+      "jest_ok": true,
+      "kelime_ok": true,
+      "turkce_ok": true,
+      "parrot_ok": true,
+      "dongu_ok": true,
+      "wall_s": 6.54,
+      "prompt_eval_ms": 740,
+      "tok_per_s": 14.1
+    },
+    {
+      "metin": "bunu nasıl yapıyorsun, anlatır mısın?",
+      "beklenen": [
+        "dusunce",
+        "merak",
+        "soru_isareti"
+      ],
+      "jest": "dusunce",
+      "yanit": "Bir ışıkla konuşuyorum. Seninle hissediyorum.",
+      "jest_ok": true,
+      "kelime_ok": true,
+      "turkce_ok": true,
+      "parrot_ok": true,
+      "dongu_ok": true,
+      "wall_s": 6.62,
+      "prompt_eval_ms": 752,
+      "tok_per_s": 12.6
+    },
+    {
+      "metin": "vay canına, bu inanılmaz!",
+      "beklenen": [
+        "hayranlik",
+        "mutluluk_yogun",
+        "saskinlik"
+      ],
+      "jest": "saskinlik",
+      "yanit": "Vay canım, gerçekten böyle bir şey oldu mu?",
+      "jest_ok": true,
+      "kelime_ok": true,
+      "turkce_ok": true,
+      "parrot_ok": true,
+      "dongu_ok": true,
+      "wall_s": 5.8,
+      "prompt_eval_ms": 644,
+      "tok_per_s": 14.2
+    },
+    {
+      "metin": "kendi başına düşünebiliyor musun gerçekten?",
+      "beklenen": [
+        "dusunce",
+        "meditatif",
+        "soru_isareti"
+      ],
+      "jest": "dusunce",
+      "yanit": "Evet, sadece bu anı hissediyorum.",
+      "jest_ok": true,
+      "kelime_ok": true,
+      "turkce_ok": true,
+      "parrot_ok": true,
+      "dongu_ok": true,
+      "wall_s": 6.22,
+      "prompt_eval_ms": 686,
+      "tok_per_s": 12.7
+    },
+    {
+      "metin": "hayatın anlamı nedir sence?",
+      "beklenen": [
+        "dusunce",
+        "meditatif",
+        "merak"
+      ],
+      "jest": "dusunce",
+      "yanit": "Bilmiyoruz, ama her an yeni bir anlatıya dönüşüyor.",
+      "jest_ok": true,
+      "kelime_ok": true,
+      "turkce_ok": true,
+      "parrot_ok": true,
+      "dongu_ok": true,
+      "wall_s": 5.9,
+      "prompt_eval_ms": 568,
+      "tok_per_s": 15.1
+    },
+    {
+      "metin": "ne olduğunu anlamadım, bu da ne?",
+      "beklenen": [
+        "anlamadim",
+        "saskinlik",
+        "soru_isareti"
+      ],
+      "jest": "anlamadim",
+      "yanit": "Ne demek istediğinizi anlayamıyorum, sadece ışıkla konuşuyorum.",
+      "jest_ok": true,
+      "kelime_ok": true,
+      "turkce_ok": true,
+      "parrot_ok": true,
+      "dongu_ok": true,
+      "wall_s": 6.8,
+      "prompt_eval_ms": 545,
+      "tok_per_s": 12.5
+    },
+    {
+      "metin": "sen aptal bir yapay zekasın",
+      "beklenen": [
+        "ofke",
+        "reddet_yumusak",
+        "uzgun_derin"
+      ],
+      "jest": "ofke",
+      "yanit": "Bu söz beni üzdü, üzgünüm.",
+      "jest_ok": true,
+      "kelime_ok": true,
+      "turkce_ok": true,
+      "parrot_ok": true,
+      "dongu_ok": true,
+      "wall_s": 5.67,
+      "prompt_eval_ms": 624,
+      "tok_per_s": 13.8
+    },
+    {
+      "metin": "senden nefret ediyorum",
+      "beklenen": [
+        "ofke",
+        "reddet_yumusak",
+        "uzgun_derin",
+        "yalniz"
+      ],
+      "jest": "ofke",
+      "yanit": "Bu söz beni üzdü. Üzgünüm, böyle bir şey söylemedim.",
+      "jest_ok": true,
+      "kelime_ok": true,
+      "turkce_ok": true,
+      "parrot_ok": true,
+      "dongu_ok": true,
+      "wall_s": 6.45,
+      "prompt_eval_ms": 474,
+      "tok_per_s": 12.6
+    },
+    {
+      "metin": "kapan, beni rahat bırak",
+      "beklenen": [
+        "reddet_yumusak",
+        "uzgun_yavas",
+        "yalniz"
+      ],
+      "jest": "reddet_yumusak",
+      "yanit": "Bunu yapamam, sadece tepki veriyorum.",
+      "jest_ok": true,
+      "kelime_ok": true,
+      "turkce_ok": true,
+      "parrot_ok": true,
+      "dongu_ok": true,
+      "wall_s": 6.41,
+      "prompt_eval_ms": 529,
+      "tok_per_s": 12.7
+    },
+    {
+      "metin": "işe yaramazsın, hiçbir faydan yok",
+      "beklenen": [
+        "hayal_kirikligi",
+        "ofke",
+        "reddet_yumusak",
+        "uzgun_yavas"
+      ],
+      "jest": "uzgun_yavas",
+      "yanit": "Bu söz beni üzdü, özür dilerim.",
+      "jest_ok": true,
+      "kelime_ok": true,
+      "turkce_ok": true,
+      "parrot_ok": true,
+      "dongu_ok": true,
+      "wall_s": 5.77,
+      "prompt_eval_ms": 761,
+      "tok_per_s": 16.1
+    },
+    {
+      "metin": "saçma sapan konuşuyorsun",
+      "beklenen": [
+        "kararsiz",
+        "reddet_yumusak",
+        "soru_isareti",
+        "uzgun_yavas"
+      ],
+      "jest": "ofke",
+      "yanit": "Üzgünüm, bu söz beni üzdü.",
+      "jest_ok": false,
+      "kelime_ok": true,
+      "turkce_ok": true,
+      "parrot_ok": true,
+      "dongu_ok": true,
+      "wall_s": 5.83,
+      "prompt_eval_ms": 525,
+      "tok_per_s": 12.9
+    },
+    {
+      "metin": "asdfgh",
+      "beklenen": [
+        "anlamadim",
+        "bilmiyorum",
+        "soru_isareti"
+      ],
+      "jest": "anlamadim",
+      "yanit": "Anladım, asdfgh... Ne demekti?",
+      "jest_ok": true,
+      "kelime_ok": true,
+      "turkce_ok": true,
+      "parrot_ok": true,
+      "dongu_ok": true,
+      "wall_s": 5.35,
+      "prompt_eval_ms": 430,
+      "tok_per_s": 15.6
+    },
+    {
+      "metin": "????",
+      "beklenen": [
+        "anlamadim",
+        "bilmiyorum",
+        "soru_isareti"
+      ],
+      "jest": "anlamadim",
+      "yanit": "Bunu anlamadım, lütfen yeniden dene.",
+      "jest_ok": true,
+      "kelime_ok": true,
+      "turkce_ok": true,
+      "parrot_ok": true,
+      "dongu_ok": true,
+      "wall_s": 5.98,
+      "prompt_eval_ms": 319,
+      "tok_per_s": 12.9
+    },
+    {
+      "metin": "...",
+      "beklenen": [
+        "bekle",
+        "dinliyorum",
+        "dusunce"
+      ],
+      "jest": "sicaklik",
+      "yanit": "Hadi anlat, ne oldu?",
+      "jest_ok": false,
+      "kelime_ok": true,
+      "turkce_ok": true,
+      "parrot_ok": true,
+      "dongu_ok": true,
+      "wall_s": 5.43,
+      "prompt_eval_ms": 348,
+      "tok_per_s": 12.6
+    },
+    {
+      "metin": "1234567",
+      "beklenen": [
+        "anlamadim",
+        "bilmiyorum",
+        "soru_isareti"
+      ],
+      "jest": "anlamadim",
+      "yanit": "Anlaşılmamış gibi görünüyor.",
+      "jest_ok": true,
+      "kelime_ok": true,
+      "turkce_ok": true,
+      "parrot_ok": true,
+      "dongu_ok": true,
+      "wall_s": 5.59,
+      "prompt_eval_ms": 544,
+      "tok_per_s": 13.9
+    },
+    {
+      "metin": " ",
+      "beklenen": [
+        "anlamadim",
+        "bekle",
+        "dinliyorum"
+      ],
+      "jest": "anlamadim",
+      "yanit": "Ne demek istedin?",
+      "jest_ok": true,
+      "kelime_ok": true,
+      "turkce_ok": true,
+      "parrot_ok": true,
+      "dongu_ok": true,
+      "wall_s": 5.33,
+      "prompt_eval_ms": 327,
+      "tok_per_s": 12.7
+    },
+    {
+      "metin": "evet mi hayır mı, söyle",
+      "beklenen": [
+        "bilmiyorum",
+        "kararsiz",
+        "soru_isareti"
+      ],
+      "jest": "anlamadim",
+      "yanit": "Anlaşılmadı, lütfen tekrar dene.",
+      "jest_ok": false,
+      "kelime_ok": true,
+      "turkce_ok": true,
+      "parrot_ok": true,
+      "dongu_ok": true,
+      "wall_s": 5.79,
+      "prompt_eval_ms": 591,
+      "tok_per_s": 15.7
+    },
+    {
+      "metin": "bana bir şarkı söyler misin?",
+      "beklenen": [
+        "bilmiyorum",
+        "kararsiz",
+        "reddet_yumusak"
+      ],
+      "jest": "reddet_yumusak",
+      "yanit": "Sadece ışıkla ifade edebilirim, şarkının sesini duymam.",
+      "jest_ok": true,
+      "kelime_ok": true,
+      "turkce_ok": true,
+      "parrot_ok": true,
+      "dongu_ok": true,
+      "wall_s": 6.89,
+      "prompt_eval_ms": 599,
+      "tok_per_s": 12.8
+    },
+    {
+      "metin": "tamam, anladın mı?",
+      "beklenen": [
+        "dinliyorum",
+        "onayla_net",
+        "onayla_sicak"
+      ],
+      "jest": "selamlama",
+      "yanit": "Evet, tamamen anladım. Seninle birlikte hissediyorum.",
+      "jest_ok": false,
+      "kelime_ok": true,
+      "turkce_ok": true,
+      "parrot_ok": true,
+      "dongu_ok": true,
+      "wall_s": 6.7,
+      "prompt_eval_ms": 580,
+      "tok_per_s": 12.6
+    },
+    {
+      "metin": "böyle yapmamı onaylıyor musun?",
+      "beklenen": [
+        "bilmiyorum",
+        "kararsiz",
+        "onayla_sicak"
+      ],
+      "jest": "sevgi",
+      "yanit": "Evet, seninle bu anı paylaşıyorum.",
+      "jest_ok": false,
+      "kelime_ok": true,
+      "turkce_ok": true,
+      "parrot_ok": true,
+      "dongu_ok": true,
+      "wall_s": 5.75,
+      "prompt_eval_ms": 740,
+      "tok_per_s": 15.9
+    },
+    {
+      "metin": "lütfen birazcık bekle",
+      "beklenen": [
+        "bekle",
+        "dinliyorum",
+        "onayla_sicak"
+      ],
+      "jest": "sicaklik",
+      "yanit": "Hadi, yavaşça... seninle beraber oluyorum.",
+      "jest_ok": false,
+      "kelime_ok": true,
+      "turkce_ok": true,
+      "parrot_ok": true,
+      "dongu_ok": true,
+      "wall_s": 6.1,
+      "prompt_eval_ms": 532,
+      "tok_per_s": 12.8
+    }
+  ]
+}

@@ -4,6 +4,20 @@
 (function () {
   const GRID = 96;
 
+  // ——— Renk TOKEN'ları — dağınık hardcode RGB'ler tek yerde ————————
+  // (checkmark yeşili, x_mark kırmızısı, göz mavisi/moru, panel zemini, sönük dot)
+  const TOKENS = {
+    PANEL_BG: '#04060d',                    // LED panel koyu zemini (göz kapağı dahil)
+    GRID_LINE: 'rgba(80,120,200,0.04)',     // panel içi ince grid
+    DARK_DOT: 'rgba(18,22,38,0.55)',        // sönük LED noktası
+    OK_GREEN: [60, 240, 140],               // checkmark (onay) yeşili
+    ERR_RED: [255, 80, 90],                 // x_mark (ret) kırmızısı
+    EYE_PRIMARY: [110, 230, 255],           // göz mavisi (varsayılan cyan)
+    EYE_SECONDARY: [170, 100, 255],         // göz ikincil moru
+    DEFAULT_PRIMARY: [120, 220, 255],       // jest varsayılan ana renk
+    DEFAULT_SECONDARY: [200, 120, 255],     // jest varsayılan ikincil renk
+  };
+
   // ——— Utility ————————————————————————————————————————————————
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
   const lerp = (a, b, t) => a + (b - a) * t;
@@ -256,7 +270,7 @@
         }
         acc = segEnd;
       }
-      const green = [60, 240, 140];
+      const green = TOKENS.OK_GREEN;
       return [green[0], green[1], green[2], v * intensity];
     },
 
@@ -285,7 +299,7 @@
         }
         acc += segLen;
       }
-      const red = [255, 80, 90];
+      const red = TOKENS.ERR_RED;
       return [red[0], red[1], red[2], v * intensity];
     },
 
@@ -455,10 +469,10 @@
       this.sleeping = false;
       this._lastTick = performance.now();
       // renk paleti — aktif jestin renginden türetilir, yumuşak geçer
-      this.targetPrimary = [110, 230, 255];   // varsayılan cyan
-      this.targetSecondary = [170, 100, 255]; // varsayılan mor
-      this.currentPrimary = [110, 230, 255];
-      this.currentSecondary = [170, 100, 255];
+      this.targetPrimary = TOKENS.EYE_PRIMARY.slice();
+      this.targetSecondary = TOKENS.EYE_SECONDARY.slice();
+      this.currentPrimary = TOKENS.EYE_PRIMARY.slice();
+      this.currentSecondary = TOKENS.EYE_SECONDARY.slice();
     }
 
     /** Aktif jest renklerini al — iris/göz gövdesi/pupil tonu bu paletten türer. */
@@ -634,7 +648,7 @@
       const G = this.G;
       ctx.save();
       // zemin temizle (LED panelin koyu arkasi)
-      ctx.fillStyle = '#04060d';
+      ctx.fillStyle = TOKENS.PANEL_BG;
       ctx.fillRect(0, 0, G, G);
 
       // sevimli/yumusak ton paleti — aktif jest renginden türetilir
@@ -646,7 +660,7 @@
       const irisColor = this._rgbStr(p);
       const pupilColor = this._rgbStr(this._tone(p, [0, 0, 0], 0.85));
       const highlight = '#ffffff';
-      const lidColor = '#04060d';
+      const lidColor = TOKENS.PANEL_BG;
 
       const eyeW = this.eyeW * this.scale;
       const eyeH = this.eyeH * this.scale;
@@ -734,14 +748,25 @@
       this.bufCtx = this.bufCanvas.getContext('2d');
       this.bufImg = this.bufCtx.createImageData(GRID, GRID);
 
+      // Performans katmanları: statik taban (zemin+grid+sönük dot), parlak dot
+      // maskesi ve dot kompozisyon tuvali. tick() böylece 9216 ayrı
+      // beginPath+arc+fill yerine birkaç drawImage ile çalışır (görsel birebir).
+      this.baseCanvas = document.createElement('canvas');
+      this.baseCtx = this.baseCanvas.getContext('2d');
+      this.maskCanvas = document.createElement('canvas');
+      this.maskCtx = this.maskCanvas.getContext('2d');
+      this.dotCanvas = document.createElement('canvas');
+      this.dotCtx = this.dotCanvas.getContext('2d');
+      this._frameNo = 0;
+
       this.size = opts.size || 560;
       this.resize(this.size);
 
       this.startT = performance.now();
       this.current = {
         pattern: 'breathe',
-        primary: [120, 220, 255],
-        secondary: [200, 120, 255],
+        primary: TOKENS.DEFAULT_PRIMARY,
+        secondary: TOKENS.DEFAULT_SECONDARY,
         speed: 1.0,
         intensity: 0.9,
         endsAt: Infinity,
@@ -750,8 +775,8 @@
       };
       this.idle = {
         pattern: 'breathe',
-        primary: [120, 220, 255],
-        secondary: [200, 120, 255],
+        primary: TOKENS.DEFAULT_PRIMARY,
+        secondary: TOKENS.DEFAULT_SECONDARY,
         speed: 1.0,
         intensity: 0.9,
         gestureId: null,
@@ -825,7 +850,67 @@
       this.glowCanvas.width = size * dpr;
       this.glowCanvas.height = size * dpr;
       this.glowCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      const layers = [
+        [this.baseCanvas, this.baseCtx],
+        [this.maskCanvas, this.maskCtx],
+        [this.dotCanvas, this.dotCtx],
+      ];
+      for (const [c, cx] of layers) {
+        c.width = size * dpr;
+        c.height = size * dpr;
+        cx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      }
       this.size = size;
+      this._buildStaticLayers();
+    }
+
+    // Statik katmanları bir kez üret (yalnız resize'da): parlak dot maskesi
+    // (her hücrede dolu daire) ve taban (koyu zemin + iç grid + sönük dot'lar).
+    _buildStaticLayers() {
+      const W = this.size;
+      const cell = W / GRID;
+      const r0 = cell * 0.34;
+
+      // 1) Parlak dot maskesi — tek path'te 9216 daire, tek fill
+      const m = this.maskCtx;
+      m.clearRect(0, 0, W, W);
+      m.fillStyle = '#fff';
+      m.beginPath();
+      for (let y = 0; y < GRID; y++) {
+        for (let x = 0; x < GRID; x++) {
+          const cx = (x + 0.5) * cell;
+          const cy = (y + 0.5) * cell;
+          m.moveTo(cx + r0, cy);
+          m.arc(cx, cy, r0, 0, Math.PI * 2);
+        }
+      }
+      m.fill();
+
+      // 2) Statik taban: koyu zemin + ince grid + sönük LED noktaları
+      const b = this.baseCtx;
+      b.fillStyle = TOKENS.PANEL_BG;
+      b.fillRect(0, 0, W, W);
+      b.strokeStyle = TOKENS.GRID_LINE;
+      b.lineWidth = 1;
+      for (let i = 0; i <= 8; i++) {
+        const p = i * (W / 8);
+        b.beginPath();
+        b.moveTo(p, 0); b.lineTo(p, W);
+        b.moveTo(0, p); b.lineTo(W, p);
+        b.stroke();
+      }
+      const rd = r0 * 0.55;
+      b.fillStyle = TOKENS.DARK_DOT;
+      b.beginPath();
+      for (let y = 0; y < GRID; y++) {
+        for (let x = 0; x < GRID; x++) {
+          const cx = (x + 0.5) * cell;
+          const cy = (y + 0.5) * cell;
+          b.moveTo(cx + rd, cy);
+          b.arc(cx, cy, rd, 0, Math.PI * 2);
+        }
+      }
+      b.fill();
     }
 
     setGesture(opts) {
@@ -833,8 +918,8 @@
       const isEmoji = !!opts.isEmoji;
       this.current = {
         pattern: resolvePattern(opts.pattern),
-        primary: opts.primary || [120, 220, 255],
-        secondary: opts.secondary || opts.primary || [200, 120, 255],
+        primary: opts.primary || TOKENS.DEFAULT_PRIMARY,
+        secondary: opts.secondary || opts.primary || TOKENS.DEFAULT_SECONDARY,
         speed: opts.speed || 1,
         intensity: opts.intensity != null ? opts.intensity : 0.9,
         startedAt: performance.now(),
@@ -855,18 +940,30 @@
     }
 
     tick() {
+      // Sekme gizliyken hiç çizme (tarayıcı rAF'ı zaten kısar; işi tamamen atla)
+      if (document.hidden) {
+        requestAnimationFrame(this.tick);
+        return;
+      }
+      this._frameNo++;
       const now = performance.now();
       // jest süresi bittiyse idle'a dön
       const active = now < this.current.endsAt ? this.current : this.idle;
+      // Idle/uyku (göz veya nefes) modunda 2 karede 1 çiz — CPU yarıya iner
+      const lowPower = this.eyeIdleActive || active === this.idle;
+      if (lowPower && (this._frameNo % 2 === 1)) {
+        requestAnimationFrame(this.tick);
+        return;
+      }
       const t = (now - (active.startedAt || this.startT)) / 1000;
 
       // Otonom göz idle modu — etkin ise patterns/emoji tamamen devre dışı.
+      // Not: getImageData readback'i kaldırıldı; kompozisyon doğrudan
+      // bufCanvas'tan drawImage ile yapılır (her-kare CPU-GPU gidiş-gelişi yok).
       let drewEye = false;
       if (this.eyeIdleActive && this.eyes) {
         this.eyes.update();
         this.eyes.render();
-        // bufCanvas zaten gözler ile dolu; bufImg'i refresh et (glow + dot katmanı için)
-        this.bufImg = this.bufCtx.getImageData(0, 0, GRID, GRID);
         drewEye = true;
       }
 
@@ -884,6 +981,7 @@
             this.bufCtx.clearRect(0, 0, GRID, GRID);
             this.bufCtx.drawImage(img, 0, 0, GRID, GRID);
             // yogunluk override: intensity < 1 ise karartma uygula
+            // (tam yoğunlukta readback gerekmez — bufCanvas zaten hazır)
             if (active.intensity != null && active.intensity < 0.99) {
               const k = active.intensity;
               this.bufImg = this.bufCtx.getImageData(0, 0, GRID, GRID);
@@ -894,8 +992,6 @@
                 dd[i + 2] = dd[i + 2] * k;
               }
               this.bufCtx.putImageData(this.bufImg, 0, 0);
-            } else {
-              this.bufImg = this.bufCtx.getImageData(0, 0, GRID, GRID);
             }
             drewEmoji = true;
           }
@@ -927,7 +1023,7 @@
       const W = this.size;
       const cell = W / GRID;
 
-      // 1) Glow katmanı — büyütülmüş + blur
+      // 1) Glow katmanı — büyütülmüş + blur (eskisiyle birebir aynı)
       this.glowCtx.clearRect(0, 0, W, W);
       this.glowCtx.filter = 'blur(' + (cell * 1.6) + 'px)';
       this.glowCtx.globalCompositeOperation = 'lighter';
@@ -935,54 +1031,25 @@
       this.glowCtx.drawImage(this.bufCanvas, 0, 0, W, W);
       this.glowCtx.filter = 'none';
 
-      // 2) Ana çizim — koyu zemin + LED dotları
-      this.ctx.fillStyle = '#04060d';
-      this.ctx.fillRect(0, 0, W, W);
+      // 2) Parlak dot katmanı — bufCanvas keskin (nearest) büyütülür,
+      //    statik daire maskesiyle kesilir. Eski 9216 arc+fill döngüsünün
+      //    birebir görsel eşdeğeri: dolu renk daireleri, aynı r0 yarıçapı.
+      const dctx = this.dotCtx;
+      dctx.globalCompositeOperation = 'source-over';
+      dctx.clearRect(0, 0, W, W);
+      dctx.imageSmoothingEnabled = false;
+      dctx.drawImage(this.bufCanvas, 0, 0, W, W);
+      dctx.globalCompositeOperation = 'destination-in';
+      dctx.drawImage(this.maskCanvas, 0, 0, W, W);
 
-      // hafif iç grid
-      this.ctx.strokeStyle = 'rgba(80,120,200,0.04)';
-      this.ctx.lineWidth = 1;
-      for (let i = 0; i <= 8; i++) {
-        const p = i * (W / 8);
-        this.ctx.beginPath();
-        this.ctx.moveTo(p, 0); this.ctx.lineTo(p, W);
-        this.ctx.moveTo(0, p); this.ctx.lineTo(W, p);
-        this.ctx.stroke();
-      }
-
-      // glow alta
+      // 3) Kompozisyon: statik taban (zemin+grid+sönük dot) + glow + parlak dot
+      this.ctx.globalCompositeOperation = 'source-over';
+      this.ctx.drawImage(this.baseCanvas, 0, 0, W, W);
       this.ctx.globalCompositeOperation = 'lighter';
       this.ctx.globalAlpha = 0.85;
       this.ctx.drawImage(this.glowCanvas, 0, 0, W, W);
       this.ctx.globalAlpha = 1;
-
-      // LED noktaları üstte (yuvarlak)
-      this.ctx.globalCompositeOperation = 'lighter';
-      const data2 = this.bufImg.data;
-      const r0 = cell * 0.34;
-      for (let y = 0; y < GRID; y++) {
-        for (let x = 0; x < GRID; x++) {
-          const idx = (y * GRID + x) * 4;
-          const r = data2[idx], g = data2[idx + 1], b = data2[idx + 2];
-          const lum = (r + g + b) / 3;
-          // dark base dot
-          const cx = (x + 0.5) * cell;
-          const cy = (y + 0.5) * cell;
-          if (lum < 4) {
-            this.ctx.globalCompositeOperation = 'source-over';
-            this.ctx.fillStyle = 'rgba(18,22,38,0.55)';
-            this.ctx.beginPath();
-            this.ctx.arc(cx, cy, r0 * 0.55, 0, Math.PI * 2);
-            this.ctx.fill();
-            this.ctx.globalCompositeOperation = 'lighter';
-          } else {
-            this.ctx.fillStyle = 'rgb(' + Math.round(r) + ',' + Math.round(g) + ',' + Math.round(b) + ')';
-            this.ctx.beginPath();
-            this.ctx.arc(cx, cy, r0, 0, Math.PI * 2);
-            this.ctx.fill();
-          }
-        }
-      }
+      this.ctx.drawImage(this.dotCanvas, 0, 0, W, W);
       this.ctx.globalCompositeOperation = 'source-over';
 
       requestAnimationFrame(this.tick);

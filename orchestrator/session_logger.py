@@ -170,6 +170,17 @@ class SessionLogger:
         self.events.append({"type": "event", "ts": ts, "msg": msg})
         self._write(f"[{ts:%H:%M:%S}] -- {msg}\n\n")
 
+    def log_game(self, mode: str, event: str, detail: str = "") -> None:
+        """Oyun oturumu olayi (baslangic/bitis/yarim) — log_event deseniyle yazar.
+
+        mode: 'tkm' | 'kelime' | 'quiz' — event: 'basladi' | 'bitti' | 'yarim_birakildi'
+        detail: serbest ozet (tur sayisi, skor, kazanan vb.).
+        """
+        msg = f"OYUN [{mode}] {event}"
+        if detail:
+            msg += f" | {detail}"
+        self.log_event(msg)
+
     def end(self) -> None:
         if self._closed:
             return

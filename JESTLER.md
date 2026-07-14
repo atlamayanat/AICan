@@ -24,7 +24,7 @@ Kullanıcı "Durdur" butonuna basana kadar oynar
 Idle nefes (sakin camgöbeği parıltı) geri gelir
 ```
 
-**Toplam:** 31 jest, 2 kategori
+**Toplam:** 32 jest, 2 kategori
 
 **Önemli ilkeler** (system_prompt.txt'de detaylı):
 
@@ -38,7 +38,7 @@ Idle nefes (sakin camgöbeği parıltı) geri gelir
 
 ## Hızlı bakış tablosu
 
-### Duygu tepkisi — AI'nin iç durumu (20)
+### Duygu tepkisi — AI'nin iç durumu (21)
 
 | Görsel | ID | Renk | Süre | Açıklama |
 |--------|-----|------|------|----------|
@@ -46,7 +46,8 @@ Idle nefes (sakin camgöbeği parıltı) geri gelir
 | ◌ | `mutluluk_sakin` | sarı | 4.0sn | Hafif memnuniyet, ilik bir hosnutluk. |
 | ♥ | `sevgi` | pembe | 4.0sn | Sicak yakinlik, sefkat ve yumusak bir baglanma. |
 | ⭐ | `hayranlik` | sarı | 4.0sn | Etkileyici bir seyle karsilasildiginda olusan ilgili buyu... |
-| 🏀 | `nese` | pembe | 3.5sn | Oyunsu, cocuksu ve canli bir hareketlilik. |
+| 🏀 | `nese` | pembe | 3.5sn | Canli, neseli bir mutluluk; pozitif ve oyunsu bir hal. |
+| 🏀 | `kahkaha` | sarı | 3.0sn | Kahkaha; komik bir seye katila katila, yuksek sesle gulme. |
 | ○ | `huzur` | açık camgöbeği | 5.0sn | Sakin, dingin, akan zamanin yumusakligi. |
 | ◌ | `sicaklik` | turuncu | 4.0sn | Empatik yaklasim, anlayis dolu bir kabul. |
 | ↑ | `gurur` | sarı | 3.5sn | Basarinin yukseltici, kendinden hosnut hissi. |
@@ -177,7 +178,7 @@ _AI'nin ic durumunu, hissini, atmosferini gosteren jestler_
 
 ### 5. 🏀 `nese`
 
-**Ne yapar:** Oyunsu, cocuksu ve canli bir hareketlilik.
+**Ne yapar:** Canli, neseli bir mutluluk; pozitif ve oyunsu bir hal.
 
 **Görsel:** zıplayan toplar — 4 top farklı tempolarda
 
@@ -192,12 +193,35 @@ _AI'nin ic durumunu, hissini, atmosferini gosteren jestler_
 **Ne zaman tetiklenir (ziyaretçi örnek cümleleri):**
 
 - "cok eglenceli"
-- "guldum"
+- "keyfim yerinde"
 - "cocuklarla oynadim"
-- "sakalas"
 - "danstayim"
+- "icim kipir kipir"
 
-### 6. ○ `huzur`
+### 6. 🏀 `kahkaha`
+
+**Ne yapar:** Kahkaha; komik bir seye katila katila, yuksek sesle gulme.
+
+**Görsel:** zıplayan toplar — 4 top farklı tempolarda
+
+**Animasyon ayarları:**
+
+- Ana renk: sarı (`#FFDC46`)
+- İkincil renk: turuncu (`#FFA028`)
+- Hız: çok hızlı
+- Bir döngü süresi: 3.0 saniye (Durdur basılana kadar tekrar eder)
+- Yoğunluk: 0.95 (parlaklık çarpanı)
+
+**Ne zaman tetiklenir (ziyaretçi örnek cümleleri):**
+
+- "cok komik"
+- "guldum"
+- "kahkaha attim"
+- "espri yaptin"
+- "gulmekten kirildim"
+- "cok guldum"
+
+### 7. ○ `huzur`
 
 **Ne yapar:** Sakin, dingin, akan zamanin yumusakligi.
 
@@ -219,7 +243,7 @@ _AI'nin ic durumunu, hissini, atmosferini gosteren jestler_
 - "sessizlik guzel"
 - "dingin bir an"
 
-### 7. ◌ `sicaklik`
+### 8. ◌ `sicaklik`
 
 **Ne yapar:** Empatik yaklasim, anlayis dolu bir kabul.
 
@@ -241,7 +265,7 @@ _AI'nin ic durumunu, hissini, atmosferini gosteren jestler_
 - "icten paylasim"
 - "tesekkur ederim"
 
-### 8. ↑ `gurur`
+### 9. ↑ `gurur`
 
 **Ne yapar:** Basarinin yukseltici, kendinden hosnut hissi.
 
@@ -263,7 +287,7 @@ _AI'nin ic durumunu, hissini, atmosferini gosteren jestler_
 - "ekibim kazandi"
 - "uzun emek karsiligi"
 
-### 9. 💧 `uzgun_yavas`
+### 10. 💧 `uzgun_yavas`
 
 **Ne yapar:** Hafif uzuntu, ici cekilmis bir durgunluk.
 
@@ -285,7 +309,7 @@ _AI'nin ic durumunu, hissini, atmosferini gosteren jestler_
 - "icim sikildi"
 - "iyi degilim"
 
-### 10. ☹ `uzgun_derin`
+### 11. ☹ `uzgun_derin`
 
 **Ne yapar:** Derin keder, agir ve yavas akan bir uzuntu.
 
@@ -307,7 +331,7 @@ _AI'nin ic durumunu, hissini, atmosferini gosteren jestler_
 - "kalbim kirik"
 - "umutsuzum"
 
-### 11. ● `yalniz`
+### 12. ● `yalniz`
 
 **Ne yapar:** Yalnizlik hissi, ice kapanma ve sessiz bir bosluk.
 
@@ -329,7 +353,7 @@ _AI'nin ic durumunu, hissini, atmosferini gosteren jestler_
 - "tek basinayim"
 - "konusacak biri yok"
 
-### 12. ↓ `hayal_kirikligi`
+### 13. ↓ `hayal_kirikligi`
 
 **Ne yapar:** Beklentinin karsilanmamasi, asagi dogru cekilen bir his.
 
@@ -351,7 +375,7 @@ _AI'nin ic durumunu, hissini, atmosferini gosteren jestler_
 - "hayal kirikligina ugradim"
 - "yarim kaldi"
 
-### 13. ⚡ `korku`
+### 14. ⚡ `korku`
 
 **Ne yapar:** Tedirgin, titrek ve dikkat kesilmis bir kaygi.
 
@@ -373,7 +397,7 @@ _AI'nin ic durumunu, hissini, atmosferini gosteren jestler_
 - "tehlike var mi"
 - "icim daraliyor"
 
-### 14. ✨ `panik`
+### 15. ✨ `panik`
 
 **Ne yapar:** Yogun ve ani uyari, savrulan bir kaygi dalgasi.
 
@@ -395,7 +419,7 @@ _AI'nin ic durumunu, hissini, atmosferini gosteren jestler_
 - "her sey ust uste"
 - "kontrolum yok"
 
-### 15. 🔥 `ofke`
+### 16. 🔥 `ofke`
 
 **Ne yapar:** Rahatsizlik tonunda, sergi senaryosuna uygun olcekli bir hosnutsuzluk.
 
@@ -417,7 +441,7 @@ _AI'nin ic durumunu, hissini, atmosferini gosteren jestler_
 - "sinirim taşti"
 - "yapmayin boyle"
 
-### 16. ╱ `sikilma`
+### 17. ╱ `sikilma`
 
 **Ne yapar:** Duragan, ilgisi azalmis, zaman uzayan bir his.
 
@@ -439,7 +463,7 @@ _AI'nin ic durumunu, hissini, atmosferini gosteren jestler_
 - "monotonluk"
 - "zaman gecmiyor"
 
-### 17. ❗ `saskinlik`
+### 18. ❗ `saskinlik`
 
 **Ne yapar:** Beklenmedik bir uyaran karsisinda ani sasirma.
 
@@ -461,7 +485,7 @@ _AI'nin ic durumunu, hissini, atmosferini gosteren jestler_
 - "nasil yani"
 - "hic dusunmemistim"
 
-### 18. ↑ `merak`
+### 19. ↑ `merak`
 
 **Ne yapar:** Daha fazlasini ogrenme istegi, ilgili yonelis.
 
@@ -483,7 +507,7 @@ _AI'nin ic durumunu, hissini, atmosferini gosteren jestler_
 - "ilginc"
 - "daha fazla soyle"
 
-### 19. ⋯ `dusunce`
+### 20. ⋯ `dusunce`
 
 **Ne yapar:** Sessiz tartma, isleme, icteki bir oyalanma.
 
@@ -505,7 +529,7 @@ _AI'nin ic durumunu, hissini, atmosferini gosteren jestler_
 - "bir sey aklimda"
 - "henuz emin degilim"
 
-### 20. ◌ `meditatif`
+### 21. ◌ `meditatif`
 
 **Ne yapar:** Derin sakinlik, ice donuk uzun nefes hissi.
 

@@ -46,6 +46,13 @@
   };
 
   let currentMode = 'desen'; // 'desen' | 'emoji'
+  const NEW_SESSION_REPLY = 'Merhaba. Sohbet edebiliriz. Oyun için "oyun oynayalım" de.';
+  const GREETING_RE = /\b(merhaba|merhabalar|selam|selamlar|gunaydin|naber)\b|\biyi (gunler|aksamlar)\b/;
+  const HOME_OPTIONS = [
+    { key: 'sohbet', label: 'Sohbet et' },
+    { key: 'oyun', label: 'Oyun oynayalım' },
+  ];
+  let displayOptionButtons = [];
 
   // ——— Sergi koruma sınırları (backend'den /api/config ile gelir)
   let MAX_CHARS = 240;
@@ -120,13 +127,16 @@
     try {
       bc = new BroadcastChannel('aibody');
       bc.onmessage = (e) => {
-        if (e.data && e.data.type === 'display_ready') {
+        const d = e.data || {};
+        if (d.type === 'display_ready') {
           lastDisplayPing = Date.now();
           if (els.connDot && !els.connDot.classList.contains('ok')) {
             els.connDot.classList.add('ok');
             els.connText.textContent = 'SERGI EKRANI BAGLI';
             log('sys', 'sergi ekrani bagli');
           }
+        } else if (d.type === 'voice_input') {
+          handleVoiceInput(d.text || '');
         }
       };
       bc.postMessage({ type: 'ping' });
@@ -148,6 +158,160 @@
   function sendToDisplay(payload) {
     if (bc) bc.postMessage(payload);
   }
+
+  // Sergi ekranındaki sürekli mikrofondan sesle gelen prompt. Metni kutuya
+  // yazıp handleSend()'e sokarız: selam algılama, oyun tetikleyici ve oyun
+  // yönlendirmesi (submitGameInput) — hepsi yeniden kullanılır. voiceBusy
+  // yanıt dönene kadar art arda tetiklemeyi engeller (ekran da stThinking'te
+  // mikrofonu kapatır; çift koruma).
+  let voiceBusy = false;
+  async function handleVoiceInput(text) {
+    text = (text || '').trim();
+    if (!text || voiceBusy) return;
+    voiceBusy = true;
+    noteActivity();
+    log('user', '🎤 ' + text);
+    if (els.prompt) { els.prompt.value = text; updateCharCount(); }
+    try {
+      await handleSend();
+    } catch (err) {
+      log('sys', 'sesli giriş işlenemedi: ' + err.message);
+    } finally {
+      voiceBusy = false;
+    }
+  }
+
+  // Sergiye "düşünüyorum" durumunu yayınla — gösterge ai_reply gelince temizlenir.
+  // jest=false: yalnız metin göstergesi (hızlı yerel oyun yanıtlarında jest titremesin).
+  function sendThinking(on, label, jest) {
+    sendToDisplay({
+      type: 'thinking',
+      on: on !== false,
+      label: label || null,
+      jest: jest !== false,
+    });
+  }
+
+  // ——— Attract / boşta modu + otomatik oturum sıfırlama ————————————
+  // Zamanlayıcı OTORİTESİ burada (girdi bu panelden gelir). İki aşama:
+  //  1) 60 sn etkileşimsiz -> attract_on (sergi dönüşümlü davet metinleri gösterir)
+  //  2) +30 sn -> "Hâlâ orada mısın?" + 10 sn görünür geri sayım (iki ekranda)
+  //     dokunulmazsa: session_reset(reload:true) + POST /api/session/new.
+  // Aktif OYUN veya süren mikrofon kaydı sırasında zamanlayıcılar ÇALIŞMAZ.
+  // Sergi tarafındaki 30sn göz-idle / 120sn uyku zamanlayıcılarına DOKUNMAZ;
+  // attract onların üzerine biner (gözler sürer, uyku attract'tan sonra da çalışır).
+  const ATTRACT_AFTER_MS = 60000;
+  const RESET_PROMPT_AFTER_MS = 30000;
+  const RESET_COUNTDOWN_S = 10;
+  let lastActivityAt = Date.now();
+  let attractOn = false;
+  let resetCountdownId = null;
+  let idleBannerEl = null;
+
+  function noteActivity() {
+    lastActivityAt = Date.now();
+    const wasIdle = attractOn || !!resetCountdownId;
+    cancelResetCountdown();
+    attractOn = false;
+    if (wasIdle) sendToDisplay({ type: 'attract_off' });
+  }
+
+  // Kontrol paneline "Hâlâ orada mısın?" bandını JS ile enjekte et
+  // (Kontrol_Paneli.html'e dokunmadan; tema renkleriyle uyumlu).
+  function ensureIdleBanner() {
+    if (idleBannerEl) return idleBannerEl;
+    const div = document.createElement('div');
+    div.id = 'idle-reset-banner';
+    div.style.cssText =
+      'position:fixed;top:18px;left:50%;transform:translateX(-50%);z-index:999;' +
+      'display:none;align-items:center;gap:14px;padding:12px 22px;' +
+      'background:rgba(18,14,38,0.94);border:1px solid rgba(110,230,255,0.5);' +
+      'border-radius:12px;font-family:"JetBrains Mono",monospace;font-size:14px;' +
+      'color:#E8E8F0;box-shadow:0 0 24px rgba(110,230,255,0.25);backdrop-filter:blur(8px);';
+    const span = document.createElement('span');
+    span.innerHTML = 'Hâlâ orada mısın? Oturum <b id="idle-reset-num">' +
+      RESET_COUNTDOWN_S + '</b> sn içinde sıfırlanacak.';
+    const btn = document.createElement('button');
+    btn.textContent = 'Buradayım';
+    btn.style.cssText =
+      'padding:6px 14px;background:rgba(110,230,255,0.14);' +
+      'border:1px solid rgba(110,230,255,0.6);color:#E8E8F0;border-radius:8px;' +
+      'cursor:pointer;font-family:inherit;font-size:13px;';
+    btn.addEventListener('click', noteActivity);
+    div.appendChild(span);
+    div.appendChild(btn);
+    document.body.appendChild(div);
+    idleBannerEl = div;
+    return div;
+  }
+
+  function startResetCountdown() {
+    if (resetCountdownId) return;
+    const banner = ensureIdleBanner();
+    banner.style.display = 'flex';
+    let left = RESET_COUNTDOWN_S;
+    const paint = () => {
+      const numEl = document.getElementById('idle-reset-num');
+      if (numEl) numEl.textContent = String(left);
+      sendToDisplay({ type: 'attract_countdown', seconds: left });
+    };
+    paint();
+    log('sys', 'oturum sıfırlama geri sayımı (' + RESET_COUNTDOWN_S + ' sn)');
+    resetCountdownId = setInterval(() => {
+      left--;
+      if (left <= 0) { performIdleReset(); return; }
+      paint();
+    }, 1000);
+  }
+
+  function cancelResetCountdown() {
+    if (resetCountdownId) { clearInterval(resetCountdownId); resetCountdownId = null; }
+    if (idleBannerEl) idleBannerEl.style.display = 'none';
+  }
+
+  // /api/session/new çağrısı — startNewVisitorSession ile ortak yardımcı.
+  async function postNewSession() {
+    const res = await fetch('/api/session/new', { method: 'POST' });
+    return res.json();
+  }
+
+  async function performIdleReset() {
+    cancelResetCountdown();
+    attractOn = false;
+    lastActivityAt = Date.now();
+    log('sys', 'etkileşimsizlik: oturum otomatik sıfırlanıyor');
+    gamePhase = null;
+    hideGameUI();
+    if (els.prompt) { els.prompt.value = ''; updateCharCount(); }
+    if (els.aiResponse) {
+      els.aiResponse.textContent = 'yanıt bekleniyor';
+      els.aiResponse.classList.add('empty');
+    }
+    // Sergi ekranı sayfayı yeniler (bellek sızıntısı sigortası; sayfa oturum-tabanlı).
+    sendToDisplay({ type: 'session_reset', reload: true });
+    try {
+      const data = await postNewSession();
+      if (data && data.error) log('sys', 'yeni oturum hatası: ' + data.error);
+      else log('sys', 'yeni ziyaretçi oturumu hazır (otomatik)');
+    } catch (e) {
+      log('sys', 'yeni oturum ağ hatası: ' + e.message);
+    }
+  }
+
+  setInterval(() => {
+    // Oyun veya mikrofon kaydı sürerken boşta sayılmaz — sayaç taze tutulur.
+    const recording = mediaRecorder && mediaRecorder.state === 'recording';
+    if (gamePhase || recording) { lastActivityAt = Date.now(); return; }
+    if (resetCountdownId) return;   // geri sayım kendi zamanlayıcısında ilerliyor
+    const idleMs = Date.now() - lastActivityAt;
+    if (!attractOn && idleMs >= ATTRACT_AFTER_MS) {
+      attractOn = true;
+      sendToDisplay({ type: 'attract_on' });
+      log('sys', 'attract modu açıldı (' + (ATTRACT_AFTER_MS / 1000) + ' sn etkileşimsiz)');
+    } else if (attractOn && idleMs >= ATTRACT_AFTER_MS + RESET_PROMPT_AFTER_MS) {
+      startResetCountdown();
+    }
+  }, 1000);
 
   // ——— Jest tetikle (kontrol panelinde onizleme + sergiye yolla) ——
   // Varsayilan duration: Infinity — jest, yeni bir jest gelene kadar oynar.
@@ -327,6 +491,8 @@
     mediaRecorder.onstop = onRecStop;
     mediaRecorder.start();
     recStartedAt = performance.now();
+    noteActivity();
+    sendToDisplay({ type: 'listening', on: true });   // sergi: "Dinliyorum…" rozeti
     setMicStatus('dinliyorum... (bırakınca durur, max ' + (MAX_RECORD_MS / 1000) + ' sn)', 'recording');
     if (els.micBtn) els.micBtn.classList.add('recording');
     // Sergi koruma: kayit MAX_RECORD_MS uzerine cikmasin (uzun ses Whisper'i kilitler)
@@ -336,6 +502,7 @@
         log('sys', 'kayit ' + (MAX_RECORD_MS / 1000) + ' sn sinirinda otomatik durduruldu');
         try { mediaRecorder.stop(); } catch (_) {}
         if (els.micBtn) els.micBtn.classList.remove('recording');
+        sendToDisplay({ type: 'listening', on: false });
       }
     }, MAX_RECORD_MS);
   }
@@ -346,9 +513,11 @@
     if (recAutoStopTimer) { clearTimeout(recAutoStopTimer); recAutoStopTimer = null; }
     try { mediaRecorder.stop(); } catch (_) {}
     if (els.micBtn) els.micBtn.classList.remove('recording');
+    sendToDisplay({ type: 'listening', on: false });
   }
 
   async function onRecStop() {
+    sendToDisplay({ type: 'listening', on: false });  // güvence (idempotent)
     const dur = (performance.now() - recStartedAt) / 1000;
     if (recChunks.length === 0 || dur < 0.3) {
       setMicStatus('çok kısa — tekrar dene', 'error');
@@ -427,12 +596,72 @@
     } catch (_) { /* varsayilanlar kalir */ }
   }
 
+  function isNewSessionGreeting(text) {
+    return GREETING_RE.test(normalizeTr(text));
+  }
+
+  async function startNewVisitorSession(text) {
+    log('user', '> ' + text);
+    els.prompt.value = '';
+    updateCharCount();
+    if (els.sendBtn) els.sendBtn.disabled = true;
+    if (els.statThink) els.statThink.textContent = '0.00 sn';
+    if (els.statTokens) els.statTokens.textContent = '0 → 0';
+    if (els.statRate) els.statRate.textContent = '— tok/s';
+    if (els.statLoad) els.statLoad.textContent = '0.0 sn';
+
+    gamePhase = null;
+    stopWordTimer();
+    hideGameUI();
+    sendToDisplay({ type: 'session_reset' });
+    sendToDisplay({ type: 'user_text', text });
+    sendThinking(true);
+
+    try {
+      const data = await postNewSession();
+      if (data.error) {
+        sendThinking(false);
+        log('sys', 'yeni oturum hatası: ' + data.error);
+        return;
+      }
+      const yanit = data.yanit || NEW_SESSION_REPLY;
+      log('sys', 'yeni ziyaretçi oturumu açıldı');
+      log('jest', data.jest_id + ' yog=' + (data.yogunluk || 0.8).toFixed(2));
+      log('yanit', "'" + yanit + "'");
+      sendToDisplay({
+        type: 'ai_reply',
+        jest_id: data.jest_id || 'selamlama',
+        yanit: yanit,
+        yogunluk: data.yogunluk || 0.8,
+      });
+      publishHomeOptions();
+      triggerGesture(data.jest_id || 'selamlama', { intensity: data.yogunluk || 0.8 });
+      if (els.aiResponse) {
+        els.aiResponse.textContent = yanit;
+        els.aiResponse.classList.remove('empty');
+      }
+    } catch (e) {
+      sendThinking(false);
+      log('sys', 'yeni oturum ağ hatası: ' + e.message);
+    } finally {
+      if (els.sendBtn) els.sendBtn.disabled = false;
+      els.prompt.focus();
+    }
+  }
+
   // ——— Gercek backend cagirisi ——————————————————————
   async function handleSend() {
     const text = (els.prompt.value || '').trim();
     if (!text) return;
+    noteActivity();
     if (text.length > MAX_CHARS) {
       log('sys', 'iptal: prompt ' + text.length + ' / ' + MAX_CHARS + ' karakter sınırını aşıyor');
+      return;
+    }
+
+    // Yeni ziyaretçi selamı, aktif oyun dahil her şeyden önce temiz başlangıç açar.
+    if (isNewSessionGreeting(text)) {
+      await startNewVisitorSession(text);
       return;
     }
 
@@ -454,8 +683,13 @@
     els.sendBtn.disabled = true;
     if (els.statThink) els.statThink.textContent = 'dusunuyor...';
 
-    // sergiye soruyu yansit (typewriter)
+    publishHomeOptions();
+    selectDisplayOption('sohbet', text);
+
+    // sergiye soruyu yansit (typewriter) + hemen "düşünüyorum" göstergesi
+    // (girdiden <400ms içinde görsel tepki: bekle jesti + nabızlanan rozet)
     sendToDisplay({ type: 'user_text', text });
+    sendThinking(true);
 
     log('llm', 'prompt baslatildi', 'model: ' + (els.activeModel.textContent || '-'));
 
@@ -472,6 +706,7 @@
           msg = 'metin çok uzun (' + data.len + ' > ' + data.max + ' karakter)';
         }
         log('sys', 'HATA: ' + msg);
+        sendThinking(false);
         if (els.statThink) els.statThink.textContent = '— sn';
         if (els.aiResponse) {
           els.aiResponse.textContent = 'Hata: ' + msg;
@@ -514,6 +749,7 @@
       }
     } catch (err) {
       log('sys', 'ag hatasi: ' + err.message);
+      sendThinking(false);
       if (els.statThink) els.statThink.textContent = '— sn';
     } finally {
       els.sendBtn.disabled = false;
@@ -522,6 +758,7 @@
   }
 
   function handleStop() {
+    noteActivity();
     if (gamePhase) {
       // Oyundayken DURDUR -> oyundan çık (sohbet moduna dön)
       gamePhase = null;
@@ -559,19 +796,26 @@
   }
 
   async function startGame(triggerText) {
+    noteActivity();
+    publishHomeOptions();
+    selectDisplayOption('oyun', triggerText || 'Oyun oynayalım');
     sendToDisplay({ type: 'user_text', text: triggerText || 'Oyun oynayalım' });
+    sendThinking(true, null, false);   // hızlı yerel yanıt: jestsiz, yalnız gösterge
     log('sys', 'oyun modu başlatılıyor');
     try {
       const r = await fetch('/api/game/start', { method: 'POST' });
       await applyGamePayload(await r.json());
     } catch (e) {
+      sendThinking(false);
       log('sys', 'oyun başlatılamadı: ' + e.message);
     }
   }
 
-  // Kelime doğrulaması/AI beklerken sergiye ara geri bildirim: bekle jesti + kısa metin.
+  // Kelime doğrulaması/AI beklerken sergiye ara geri bildirim.
+  // Genel 'thinking' mekanizmasını özel etiketle kullanır (bekle jesti + gösterge);
+  // eski sahte ai_reply yolu kaldırıldı (TTS'e gitmesin, sadece görsel dursun).
   function showThinking(msg) {
-    sendToDisplay({ type: 'ai_reply', jest_id: 'bekle', yanit: msg, yogunluk: 0.6 });
+    sendThinking(true, msg, true);
     if (gestureMap.has('bekle')) triggerGesture('bekle', { intensity: 0.6 });
     if (els.aiResponse) {
       els.aiResponse.textContent = msg;
@@ -580,7 +824,10 @@
   }
 
   async function submitGameInput(text, displayText) {
+    noteActivity();
+    selectDisplayOption(text, displayText || text);
     sendToDisplay({ type: 'user_text', text: displayText || text });
+    sendThinking(true, null, false);   // anında görsel tepki (jestsiz)
     // Kullanıcı cevap verince geri sayımı HEMEN durdur: yanlış "süre doldu" tetiklenmesini
     // ve istek-yarışını önler (doğrulama LLM'e giderse sayaç dönmeye devam etmemeli).
     const wasUserWordTurn = (gamePhase === 'kelime' && wordTimer.who === 'user' && !!wordTimer.id);
@@ -599,10 +846,11 @@
       });
       const data = await r.json();
       if (thinkTimer) { clearTimeout(thinkTimer); thinkTimer = null; }
-      if (data.error) { log('sys', 'oyun hatası: ' + data.error); return; }
+      if (data.error) { sendThinking(false); log('sys', 'oyun hatası: ' + data.error); return; }
       await applyGamePayload(data);
     } catch (e) {
       if (thinkTimer) { clearTimeout(thinkTimer); thinkTimer = null; }
+      sendThinking(false);
       log('sys', 'oyun ağ hatası: ' + e.message);
     }
   }
@@ -640,6 +888,7 @@
       updateGameScoreUI(p.score);
     }
     renderGameButtons(p.buttons || []);
+    publishGameOptions(p);
     if (els.gameTheme) {
       const adlar = { edebiyat: 'Edebiyat', tarih: 'Tarih', bilim: 'Bilim', genel: 'Genel' };
       els.gameTheme.textContent = p.category ? ('Tema: ' + (adlar[p.category] || p.category)) : '';
@@ -768,6 +1017,65 @@
       els.gameButtons.appendChild(btn);
     });
   }
+  function publishGameOptions(payload) {
+    const p = payload || {};
+    const buttons = Array.isArray(p.buttons) ? p.buttons : [];
+    displayOptionButtons = buttons.slice();
+    sendToDisplay({
+      type: 'game_options',
+      visible: buttons.length > 0,
+      buttons: buttons,
+      phase: p.phase || null,
+      game: p.game || null,
+      kind: p.kind || null,
+    });
+  }
+  function publishHomeOptions() {
+    displayOptionButtons = HOME_OPTIONS.slice();
+    sendToDisplay({
+      type: 'game_options',
+      visible: true,
+      buttons: HOME_OPTIONS,
+      phase: 'idle',
+      game: null,
+      kind: 'home',
+    });
+  }
+  function optionTextForMatch(button) {
+    return normalizeTr([
+      button && button.key,
+      button && button.label,
+    ].filter(Boolean).join(' '));
+  }
+  function selectedOptionKey(text, fallbackText) {
+    const explicit = normalizeTr(text);
+    for (const b of displayOptionButtons) {
+      const key = String((b && b.key) || '');
+      if (explicit && explicit === normalizeTr(key)) return key;
+    }
+    const n = normalizeTr([text, fallbackText].filter(Boolean).join(' '));
+    if (!n) return '';
+    for (const b of displayOptionButtons) {
+      const key = String((b && b.key) || '');
+      const label = optionTextForMatch(b);
+      if (n === normalizeTr(key) || label === n || label.includes(n) || n.includes(label)) {
+        return key;
+      }
+    }
+    return normalizeTr(text);
+  }
+  function selectDisplayOption(text, label) {
+    const key = selectedOptionKey(text, label);
+    sendToDisplay({
+      type: 'game_option_select',
+      key: key,
+      text: label || text || key,
+    });
+  }
+  function hideGameOptions() {
+    displayOptionButtons = [];
+    sendToDisplay({ type: 'game_options', visible: false, buttons: [] });
+  }
   function updateGameScoreUI(score) {
     if (els.gameScore) {
       els.gameScore.textContent = 'BEN ' + score.ai + ' · ' + score.user + ' SEN'
@@ -777,6 +1085,8 @@
   function hideGameUI() {
     if (els.gameButtons) els.gameButtons.innerHTML = '';
     if (els.gameScore) els.gameScore.textContent = '—';
+    if (els.gameTheme) els.gameTheme.textContent = '';
+    hideGameOptions();
     stopWordTimer();
   }
 
@@ -794,6 +1104,7 @@
         '<span class="chip-name">' + humanName(g.id) + '</span>';
       btn.title = g.id + ' (' + g.animasyon.desen + ')';
       btn.addEventListener('click', () => {
+        noteActivity();
         triggerGesture(g.id);
         sendToDisplay({ type: 'manual_gesture', jest_id: g.id });
         log('sys', 'manuel jest: ' + g.id);
@@ -910,6 +1221,7 @@
 
     if (els.prompt) {
       els.prompt.addEventListener('input', updateCharCount);
+      els.prompt.addEventListener('input', noteActivity);   // yazmak = etkileşim
       updateCharCount();
     }
 

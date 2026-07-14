@@ -13,7 +13,9 @@ from __future__ import annotations
 
 import json
 import logging
+import random
 import re
+from pathlib import Path
 
 import requests
 
@@ -44,6 +46,41 @@ def son_harf(kelime: str) -> str:
 def ilk_harf(kelime: str) -> str:
     k = temiz_kelime(kelime)
     return k[0] if k else ""
+
+
+# ——— Statik yedek havuz (ai/word_categories.json) ——————————————————
+# Sergi sağlamlığı: LLM timeout/hata verdiğinde oyun kilitlenmesin diye
+# uret_kelime önce LLM'i dener, olmazsa bu havuzdan (doğru harfle başlayan +
+# o oyunda kullanılmamış) kelime seçer. Havuzda da yoksa None döner (mevcut
+# 'pes' akışı korunur). game_engine._pick_ai_word havuz deseninin word_llm
+# tarafındaki karşılığıdır; dosya okunamazsa boş havuz = eski davranış.
+_CATS_PATH = Path(__file__).resolve().parent.parent / "ai" / "word_categories.json"
+_yedek_havuz_cache = None  # {harf: [kelime, ...]} — lazy, tek sefer yüklenir
+
+
+def _yedek_havuz() -> dict:
+    global _yedek_havuz_cache
+    if _yedek_havuz_cache is None:
+        idx: dict = {}
+        try:
+            data = json.loads(_CATS_PATH.read_text(encoding="utf-8"))
+            for words in data.values():
+                if not isinstance(words, list):
+                    continue
+                for w in words:
+                    w = temiz_kelime(w)
+                    if len(w) >= 2:
+                        idx.setdefault(w[0], []).append(w)
+        except (OSError, json.JSONDecodeError, ValueError) as e:
+            log.warning("Yedek kelime havuzu okunamadı (%s): %s", _CATS_PATH, e)
+        _yedek_havuz_cache = idx
+    return _yedek_havuz_cache
+
+
+def _havuzdan_kelime(harf: str, kullanilmis: set) -> str | None:
+    """Havuzdan `harf` ile başlayan, kullanılmamış rastgele kelime; yoksa None."""
+    adaylar = [w for w in _yedek_havuz().get(harf, []) if w not in kullanilmis]
+    return random.choice(adaylar) if adaylar else None
 
 
 # ——— LLM çağrı şemaları ————————————————————————————————————————
@@ -143,7 +180,12 @@ class WordLLM:
             kelime = temiz_kelime(data.get("kelime", ""))
             if kelime and kelime[0] == harf and kelime not in kullanilmis and len(kelime) >= 2:
                 return kelime
-        return None
+        # LLM başarısız (timeout/erişilemedi/kural ihlali) → statik havuz yedeği.
+        # Oyun kilitlenmez; havuzda da uygun kelime yoksa None = mevcut 'pes' akışı.
+        yedek = _havuzdan_kelime(harf, kullanilmis)
+        if yedek is not None:
+            log.info("uret_kelime: LLM başarısız — statik havuzdan '%s' seçildi.", yedek)
+        return yedek
 
     # ——— Kullanıcının kelimesi gerçek mi? ————————————————————————
     def gecerli_mi(self, kelime: str) -> bool:

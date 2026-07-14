@@ -128,6 +128,12 @@
       "aciklama": "Oyunsu, neşeli paylaşım"
     },
     {
+      "metin": "az önce çok komik bir şey oldu, gülmekten kırıldım",
+      "beklenen_jest": "kahkaha",
+      "kabul_edilebilir_alternatifler": ["nese", "mutluluk_yogun"],
+      "aciklama": "Komik/şaka anı; katıla katıla gülme"
+    },
+    {
       "metin": "doğa beni büyülüyor",
       "beklenen_jest": "hayranlik",
       "kabul_edilebilir_alternatifler": ["huzur", "sevgi"],

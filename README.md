@@ -57,25 +57,30 @@ ollama list      # bos liste donmeli (henuz model yok)
 
 ---
 
-### 3. Gemma 3 4B modelini indir
+### 3. Qwen3 4B Instruct modelini indir
+
+Aktif model `qwen3:4b-instruct-2507-q4_K_M` (config.json'daki `ollama_model`).
+2026-07-03 A/B testinde (50 örnek, jest doğruluğu) qwen3:4b-instruct 45/50 ile
+gemma3:4b'yi (33/50) açık farkla geçti; gemma'nın Türkçesi daha akıcı ama kural
+takibi zayıf. Karşılaştırma raporları: `logs/after_prompt_v3_qwen3-4b.json` ve
+`logs/ab_gemma3-4b.json`.
 
 ```bash
-ollama pull gemma3:4b
+ollama pull qwen3:4b-instruct-2507-q4_K_M
 ```
 
-İndirme ~3.1 GB — internet hızına göre 5-15 dakika sürer. Bittiğinde:
+İndirme ~2.5 GB — internet hızına göre 5-15 dakika sürer. Bittiğinde:
 
 ```bash
 ollama list
-# qwen veya gemma'nin gorulmesi gerek:
-# NAME            ID              SIZE     MODIFIED
-# gemma3:4b       a2af6cc3eb7f    3.1 GB   X minutes ago
+# NAME                            ID              SIZE     MODIFIED
+# qwen3:4b-instruct-2507-q4_K_M   0edcdef34593    2.5 GB   X minutes ago
 ```
 
 **Hızlı test** (Ollama düzgün çalışıyor mu):
 
 ```bash
-ollama run gemma3:4b "merhaba"
+ollama run qwen3:4b-instruct-2507-q4_K_M "merhaba"
 # Turkce kisa bir yanit gelmesi gerek (Ctrl+D ile cik)
 ```
 
@@ -262,10 +267,10 @@ Uygulama her başladığında bu dosyaya yeni bir oturum **eklenir** (üzerine y
 ================================================================================
 OTURUM BAŞLANGICI — 2026-05-03 14:32:01
 ================================================================================
-Model adı:           gemma3:4b
-Model boyutu:        3.11 GB
+Model adı:           qwen3:4b-instruct-2507-q4_K_M
+Model boyutu:        2.5 GB
 Format:              gguf
-Family:              gemma3
+Family:              qwen3
 Parametre sayısı:    4.3B
 Quantization:        Q4_K_M
 Python:              3.13.0
@@ -328,6 +333,67 @@ Performans, Token kullanımı, RAM, Kategori dağılımı, En sık jestler...
 - **Süresiz jest:** AI bir jest seçince matriste sonsuza kadar oynar. Sadece **Durdur** butonu bitirir. Bu, sergi izleyicisinin animasyonu rahatça izlemesini sağlar.
 - **`gestures.json` = doğru kaynak:** desen, renk, hız — hepsi buradan okunur. Yeni jest eklerken sadece bu dosyayı güncelle (`gesture_engine.PATTERN_DISPATCH` listesi geçerli `desen` değerlerini gösterir).
 - **`session_logger.py`:** her oturum başında dosyaya başlık yazar, her olayı satır satır kaydeder, kapanışta özet ekler. Önceki oturumlar korunur (3 boş satır boşlukla).
+
+---
+
+## 🛡 Sergi Dayanıklılığı
+
+Kiosk günlerce kesintisiz çalışacaksa aşağıdaki önlemler önerilir.
+
+### 1. Gecelik yeniden başlatma (Windows Görev Zamanlayıcı)
+
+Tarayıcı ve sunucuyu her gece (örn. 04:00, sergi kapalıyken) tazelemek bellek sızıntılarını ve Ollama KV-cache şişmesini sıfırlar:
+
+1. `taskschd.msc` aç → **Görev Oluştur**.
+2. **Tetikleyici:** Günlük, 04:00.
+3. **Eylem 1:** `taskkill /IM msedge.exe /F & taskkill /IM python.exe /F` (bir `.bat` içinde; kendi tarayıcı sürecinin adını kullan).
+4. **Eylem 2 (veya ayrı görev, 1-2 dk sonra):** `python orchestrator/web_server.py` çalıştıran bir `.bat` (çalışma dizini proje kökü olacak şekilde). Sunucu açılışta iki sekmeyi kendisi açar.
+5. Görevi **"Kullanıcı oturum açmış olsun olmasın"** yerine kiosk kullanıcısı oturumunda çalışacak şekilde ayarla (tarayıcı penceresi açılabilsin).
+
+### 2. `/api/health` ile izleme (watchdog)
+
+`GET http://127.0.0.1:5057/api/health` şunu döner:
+
+```json
+{ "ollama": true, "model": "qwen3:4b-instruct-2507-q4_K_M", "tts": true, "tts_status": "hazir", "uptime_s": 12345.6 }
+```
+
+- `ollama: false` → Ollama servisi düşmüş; `ollama serve`/servisi yeniden başlat.
+- `tts: false` → TTS motoru yüklenememiş (`tts_status` sebep verir); ses olmadan sergi çalışmaya devam eder.
+- `uptime_s` → gecelik yeniden başlatmanın gerçekten olduğunu doğrulamak için (sabah küçük bir değer görmelisin).
+- Basit watchdog: Görev Zamanlayıcı'da 5 dakikada bir `curl -s http://127.0.0.1:5057/api/health || <yeniden-baslat.bat>` koşan bir görev.
+
+Ayrıca `/api/send`, Ollama tamamen kapalıyken bile artık HTTP 200 + nazik bir "Şu an düşünemiyorum…" yanıtı döner (`meta.degraded: true`) — kiosk hata kutusu göstermez.
+
+### 3. Ollama ortam değişkenleri
+
+Bu makinede `setx` ile sistem geneline eklendi (yeni kurulumda tekrar ekle, sonra Ollama'yı yeniden başlat):
+
+```bat
+setx OLLAMA_FLASH_ATTENTION 1
+setx OLLAMA_KV_CACHE_TYPE q8_0
+setx OLLAMA_NUM_PARALLEL 1
+setx OLLAMA_MAX_LOADED_MODELS 1
+```
+
+- `FLASH_ATTENTION=1` + `KV_CACHE_TYPE=q8_0` → KV cache yarıya iner, 4 GB VRAM'e daha rahat sığar.
+- `NUM_PARALLEL=1` + `MAX_LOADED_MODELS=1` → tek kiosk isteği için gereksiz paralellik/ikinci model yüklemesi engellenir.
+
+### 4. `ollama ps` — %100 GPU kontrolü
+
+```bash
+ollama ps
+# NAME                            ...  PROCESSOR    ...
+# qwen3:4b-instruct-2507-q4_K_M   ...  100% GPU
+# %100 GPU degilse: config'te llm_num_gpu=99 zorlamasi + oksuz llama-server.exe
+# sureclerini kontrol et (Stop-Process -Name llama-server) — kismi CPU tasmasi 4-5x yavaslatir.
+```
+
+`PROCESSOR` sütununda **100% GPU** görünmeli. `xx%/yy% CPU/GPU` görünüyorsa model VRAM'e sığmamış demektir (yanıtlar belirgin yavaşlar) — KV cache ayarlarını (yukarıda) doğrula, başka VRAM tüketen uygulama (tarayıcı GPU sekmeleri dahil) var mı bak, gerekirse daha küçük model kullan.
+
+### 5. Oyun oturumu izleri
+
+Oyun başlangıç/bitişleri de `logs/session.log`'a yazılır (`OYUN [tkm|kelime|quiz] basladi/bitti/yarim_birakildi | skor…` satırları) — gün sonunda hangi oyunların ne kadar oynandığı buradan çıkarılır.
 
 ---
 
