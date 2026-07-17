@@ -39,6 +39,10 @@ Thumbs.db
 assets/emojis/**/preview.gif
 assets/emojis/**/preview_zoom.gif
 
+# API anahtarlari (gizli — asla commit etme)
+.env
+orchestrator/.env
+
 # Seslendirme (TTS)
 # NOT: .gitignore satir-ici yorumu desteklemez; aciklamalar kendi satirinda.
 # uretilen ses onbellegi (runtime)

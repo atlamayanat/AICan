@@ -38,6 +38,7 @@ from word_llm import son_harf                                 # noqa: E402
 from web_server import (                                      # noqa: E402
     _split_sentences_tr, KELIME_KURAL_TEXT, HAZIR_BEKLE_TEXT,
     SESSION_GREETING_TEXT, SESSION_GREETING_JEST, DEFAULT_TTS_VOICE, load_config,
+    TEST_OYUNLAR, TEST_SOHBET_KAPALI_TEXT, _test_greeting_yanit,
 )
 from tts.engine_elevenlabs import emotion_signature           # noqa: E402
 
@@ -89,6 +90,15 @@ def build_units(ge):
     # 1) Sabit cekirdek replikler
     add("menu", [ge._menu_payload()["yanit"], ge._menu_payload(reprompt=True)["yanit"]],
         [_JEST["menu"]], 0.8)
+    # Test modu ('g' tusu: sinirli menu + sohbet kapali) replikleri de cache'te olsun.
+    eski_izin = ge.izinli_oyunlar
+    ge.izinli_oyunlar = TEST_OYUNLAR
+    tm_menu = ge._menu_payload()
+    add("menu_test",
+        [_test_greeting_yanit(tm_menu), tm_menu["yanit"],
+         ge._menu_payload(reprompt=True)["yanit"], TEST_SOHBET_KAPALI_TEXT],
+        [_JEST["menu"], SESSION_GREETING_JEST], 0.8)
+    ge.izinli_oyunlar = eski_izin
     add("exit", list(_TXT["exit"]), [_JEST["exit"]], 0.6)
     add("kelime_kural", [KELIME_KURAL_TEXT], _JEST["kel_intro"], 0.8)
     add("hazir_bekle", [HAZIR_BEKLE_TEXT], ["bekle"], 0.6)
@@ -122,10 +132,22 @@ def build_units(ge):
     prompts, reveals = _enumerate_quiz(ge)
     add("quiz_prompts", prompts,
         _JEST["kel_intro"] + _JEST["kel_user_ok"] + _JEST["kel_retry"], 0.85)
-    fb = [f"Cevap: {rv}." for rv in reveals]              # dogru/yanlis'ta ORTAK cevap cumleleri
+    # rstrip(' .'): runtime'daki beklenen = reveal.rstrip(" .") ile BIREBIR ayni
+    # metin (aksi halde "doner.." cift nokta -> farkli cache anahtari -> miss).
+    fb = [f"Cevap: {rv.rstrip(' .')}." for rv in reveals]  # dogru/yanlis'ta ORTAK cevap cumleleri
     fb += list(GameEngine._QUIZ_DOGRU_CHEER)              # 3 tezahurat cumlesi
-    fb += ["Yaklaştın!", "Süre doldu!"]                    # 2 uyari cumlesi
+    fb += list(GameEngine._QUIZ_YAKIN)                    # yakin-cevap onekleri
+    fb += list(GameEngine._QUIZ_YANLIS)                   # notr yanlis onekleri
+    fb += ["Süre doldu!"]                                  # zaman asimi
     add("quiz_feedback", fb, _JEST["kel_user_ok"] + _JEST["kel_retry"], 0.85)
+
+    # 5) Quiz bitisi: "Bitti!" min_len altinda kaldigi icin skor cumlesiyle
+    # BIRLESIR -> tum ulasilabilir skor varyantlari (d <= t <= soru sayisi)
+    # birlesik haliyle on-uretilir; kapanis replikleri ayri cumle.
+    n_q = GameEngine.QUIZ_QUESTION_COUNT
+    bitis = [f"Bitti! {d}/{t} doğru." for t in range(1, n_q + 1) for d in range(0, t + 1)]
+    bitis += ["Harikasın!", "Güzel oynadın!", "Önemli değil, yine beklerim!"]
+    add("quiz_end", bitis, _JEST["kel_user_ok"] + _JEST["kel_intro"] + ["huzur"], 0.9)
 
     return U
 

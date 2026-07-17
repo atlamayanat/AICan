@@ -52,7 +52,66 @@
     { key: 'sohbet', label: 'Sohbet et' },
     { key: 'oyun', label: 'Oyun oynayalım' },
   ];
+  const HOME_OPTIONS_TEST = [
+    { key: 'oyun', label: 'Oyun oynayalım' },
+  ];
   let displayOptionButtons = [];
+
+  // ——— Test modu (sergi test günü) ———————————————————————————
+  // 'g' tuşu / POST /api/test_mode: menüde yalnız Eş/Zıt + Atasözü, sohbet kapalı,
+  // "merhaba" doğrudan oyun menüsü açar. Durum backend'de (config.json'da kalıcı).
+  let testMode = false;
+  let testBadgeEl = null;
+
+  function ensureTestBadge() {
+    if (testBadgeEl) return testBadgeEl;
+    const div = document.createElement('div');
+    div.id = 'test-mode-badge';
+    div.style.cssText =
+      'position:fixed;bottom:14px;right:14px;z-index:998;display:none;' +
+      'padding:6px 12px;border-radius:8px;font-family:"JetBrains Mono",monospace;' +
+      'font-size:12px;letter-spacing:1px;font-weight:700;color:#131022;' +
+      'background:#ffd166;box-shadow:0 0 14px rgba(255,209,102,0.45);';
+    div.textContent = 'TEST MODU · 2 OYUN · SOHBET KAPALI';
+    document.body.appendChild(div);
+    testBadgeEl = div;
+    return div;
+  }
+
+  function applyTestMode(on, broadcast) {
+    const changed = testMode !== !!on;
+    testMode = !!on;
+    ensureTestBadge().style.display = testMode ? 'block' : 'none';
+    if (changed) {
+      // Backend oyun durumunu sıfırladı — panelde eski butonlar kalmasın.
+      gamePhase = null;
+      hideGameUI();
+      log('sys', 'test modu: ' + (testMode
+        ? 'AÇIK (yalnız Eş/Zıt + Atasözü, sohbet kapalı)' : 'KAPALI'));
+    }
+    if (broadcast) sendToDisplay({ type: 'test_mode', on: testMode });
+  }
+
+  let testToggleBusy = false;
+  async function toggleTestMode() {
+    if (testToggleBusy) return;    // tuş basılı tutulursa istek seli olmasın
+    testToggleBusy = true;
+    noteActivity();
+    try {
+      // Kör toggle yerine hedef durumu gönder: tekrar/yarış durumlarında yakınsar.
+      const r = await fetch('/api/test_mode', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ on: !testMode }),
+      });
+      const d = await r.json();
+      applyTestMode(!!d.on, true);
+    } catch (e) {
+      log('sys', 'test modu değiştirilemedi: ' + e.message);
+    } finally {
+      testToggleBusy = false;
+    }
+  }
 
   // ——— Sergi koruma sınırları (backend'den /api/config ile gelir)
   let MAX_CHARS = 240;
@@ -137,6 +196,8 @@
           }
         } else if (d.type === 'voice_input') {
           handleVoiceInput(d.text || '');
+        } else if (d.type === 'test_mode') {
+          applyTestMode(!!d.on, false);   // sergi ekranından 'g' ile değişti
         }
       };
       bc.postMessage({ type: 'ping' });
@@ -145,6 +206,7 @@
       log('sys', 'BroadcastChannel desteklenmiyor');
     }
     // her 2 sn'de ping at; 6 sn cevapsiz kalirsa kopuk goster
+    let testSyncTick = 0;
     setInterval(() => {
       if (!bc) return;
       bc.postMessage({ type: 'ping' });
@@ -152,6 +214,13 @@
         els.connDot.classList.remove('ok');
         els.connText.textContent = 'SERGI EKRANI ARANIYOR';
         log('sys', 'sergi ekrani kopuk');
+      }
+      // Test modu durumunu ~10 sn'de bir sunucudan doğrula: harici POST/curl ya da
+      // kaçırılmış broadcast kaynaklı senkron kaybını kendiliğinden onarır.
+      if (++testSyncTick % 5 === 0) {
+        fetch('/api/test_mode').then((r) => r.json()).then((d) => {
+          if (d && typeof d.on === 'boolean' && d.on !== testMode) applyTestMode(d.on, true);
+        }).catch(() => {});
       }
     }, 2000);
   }
@@ -299,9 +368,14 @@
   }
 
   setInterval(() => {
-    // Oyun veya mikrofon kaydı sürerken boşta sayılmaz — sayaç taze tutulur.
+    // Yalnız SÜRELİ tur (geri sayım dönerken) veya mikrofon kaydı boşta sayılmaz.
+    // Menü / hazır / bitiş ekranları boşta SAYILIR ki terk edilmiş kioskta
+    // attract + otomatik oturum sıfırlama çalışsın (test modunda her etkileşim
+    // bir oyun fazında bittiği için bu şart; eski 'gamePhase' koşulu kioskun
+    // bayat menüde sonsuza dek donmasına yol açıyordu).
     const recording = mediaRecorder && mediaRecorder.state === 'recording';
-    if (gamePhase || recording) { lastActivityAt = Date.now(); return; }
+    const timedTurn = !!wordTimer.id;
+    if (timedTurn || recording) { lastActivityAt = Date.now(); return; }
     if (resetCountdownId) return;   // geri sayım kendi zamanlayıcısında ilerliyor
     const idleMs = Date.now() - lastActivityAt;
     if (!attractOn && idleMs >= ATTRACT_AFTER_MS) {
@@ -592,6 +666,7 @@
         if (els.prompt) els.prompt.maxLength = MAX_CHARS;
       }
       if (d.max_record_seconds) MAX_RECORD_MS = d.max_record_seconds * 1000;
+      if (typeof d.test_mode === 'boolean') applyTestMode(d.test_mode, true);
       updateCharCount();
     } catch (_) { /* varsayilanlar kalir */ }
   }
@@ -622,6 +697,12 @@
       if (data.error) {
         sendThinking(false);
         log('sys', 'yeni oturum hatası: ' + data.error);
+        return;
+      }
+      if (data.phase === 'menu') {
+        // Test modu: selamlama + oyun menüsü tek payload olarak gelir.
+        log('sys', 'yeni ziyaretçi oturumu (test modu: selamlama + oyun menüsü)');
+        await applyGamePayload(data);
         return;
       }
       const yanit = data.yanit || NEW_SESSION_REPLY;
@@ -667,12 +748,21 @@
 
     // ——— Oyun modu yönlendirmesi ———
     // Aktif oyun varsa girdi oyuna gider; "OYUN OYNAYALIM" hazır komutu oyunu başlatır.
-    if (gamePhase || isGameTrigger(text)) {
+    // Test modunda sohbet kapalı: HER girdi oyun akışına gider; ziyaretçi boşta
+    // doğrudan oyun adı söylediyse ("atasözü!") menü adımı atlanıp seçim iletilir.
+    if (gamePhase || testMode || isGameTrigger(text)) {
       log('user', '> ' + text);
       els.prompt.value = '';
       updateCharCount();
-      if (gamePhase) await submitGameInput(text, null);
-      else await startGame(text);
+      if (gamePhase) {
+        await submitGameInput(text, null);
+      } else if (testMode && !isGameTrigger(text) && TEST_GAME_WORD_RE.test(normalizeTr(text))) {
+        try { await startGameQuiet(); } catch (_) {}
+        if (gamePhase === 'menu') await submitGameInput(text, text);
+        else await startGame(text);   // sessiz başlatma olmadıysa normal yol
+      } else {
+        await startGame(text);
+      }
       els.prompt.focus();
       return;
     }
@@ -793,6 +883,19 @@
     const n = normalizeTr(text);
     if (n === 'oyun' || n === 'oyna' || n === 'oyun modu') return true;
     return /\boyun\s*oyna/.test(n);
+  }
+
+  // Test modunda boşta söylenen oyun adları (backend _handle_menu ile hizalı;
+  // "anlamadım" tetiklemesin diye es/zit/anlam tam kelime aranır).
+  const TEST_GAME_WORD_RE = /atasoz|deyim|esanlam|zitanlam|\b(es|zit|anlam)\b/;
+
+  // Menüyü SESSİZCE aç (ekrana menü mesajı basmadan): ziyaretçinin söylediği
+  // oyun adını tek adımda iletebilmek için ara durak.
+  async function startGameQuiet() {
+    const r = await fetch('/api/game/start', { method: 'POST' });
+    const data = await r.json();
+    gamePhase = (data.phase && data.phase !== 'idle') ? data.phase : null;
+    return data;
   }
 
   async function startGame(triggerText) {
@@ -1031,11 +1134,12 @@
     });
   }
   function publishHomeOptions() {
-    displayOptionButtons = HOME_OPTIONS.slice();
+    const opts = testMode ? HOME_OPTIONS_TEST : HOME_OPTIONS;   // test modunda 'Sohbet et' yok
+    displayOptionButtons = opts.slice();
     sendToDisplay({
       type: 'game_options',
       visible: true,
-      buttons: HOME_OPTIONS,
+      buttons: opts,
       phase: 'idle',
       game: null,
       kind: 'home',
@@ -1241,17 +1345,19 @@
 
     initMic();
 
-    // M tusu: mod toggle (input dışındayken)
+    // M tusu: mod toggle · G tusu: test modu (input dışındayken)
     document.addEventListener('keydown', (e) => {
+      if (e.repeat) return;   // tuş basılı tutulunca tekrar tetiklenmesin
       if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
       if (e.key === 'm' || e.key === 'M') toggleMode();
+      if (e.key === 'g' || e.key === 'G') toggleTestMode();
     });
 
     // Sergi ekranı bağlandığında mevcut modu ona da gönder (geç açılırsa)
     setTimeout(() => sendToDisplay({ type: 'set_mode', mode: currentMode }), 800);
 
     log('sys', 'kontrol paneli hazir');
-    log('sys', 'enter ile gonder · m ile mod degis');
+    log('sys', 'enter ile gonder · m ile mod degis · g ile test modu (2 oyun)');
 
     if (els.statThink) els.statThink.textContent = '— sn';
     if (els.statLoad) els.statLoad.textContent = '— sn';

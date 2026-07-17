@@ -1,0 +1,3 @@
+# Windows batch dosyalari CRLF ister: LF-only .bat + cok baytli karakter,
+# cmd.exe'nin dosyayi bastan sona yanlis ayristirmasina yol acar (kanitlandi).
+*.bat text eol=crlf

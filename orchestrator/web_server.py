@@ -68,6 +68,31 @@ SESSION_GREETING_TEXT = 'Merhaba. Sohbet edebiliriz. Oyun için "oyun oynayalım
 SESSION_GREETING_JEST = "selamlama"
 SESSION_GREETING_YOGUNLUK = 0.8
 
+# ——— TEST MODU (sergi test gunu) ———————————————————————————————
+# 'g' tusu / POST /api/test_mode ile acilip kapanir; config.json'da kalicidir.
+# Acikken: menude yalnizca TEST_OYUNLAR, sohbet (/api/send LLM yolu) kapali,
+# "merhaba" selamlamasi dogrudan oyun menusunu acar.
+TEST_OYUNLAR = ("eszit", "atasozu")
+TEST_GREETING_LEAD = "Merhaba, hoş geldin!"
+TEST_SOHBET_KAPALI_TEXT = "Bugün oyun günü! Hangisini oynayalım — dokun ya da söyle."
+
+
+def _test_greeting_yanit(menu_payload: dict) -> str:
+    """Test modunda 'merhaba' yaniti: selamlama + oyun secimi (menu butonlarindan).
+    Tek kaynak: /api/session/new, on-isitma ve gen_batch ayni metni uretir."""
+    labels = " · ".join(b["label"] for b in menu_payload.get("buttons", []))
+    return f"{TEST_GREETING_LEAD} Hangisini oynayalım? Dokun ya da söyle: {labels}"
+
+
+def _test_mode_texts() -> list:
+    """Test modu sabit replikleri (on-isitma icin) — gecici sinirli motorla birebir."""
+    from game_engine import GameEngine
+    g = GameEngine(bridge=None)
+    g.izinli_oyunlar = TEST_OYUNLAR
+    menu = g._menu_payload()
+    return [_test_greeting_yanit(menu), menu["yanit"],
+            g._menu_payload(reprompt=True)["yanit"], TEST_SOHBET_KAPALI_TEXT]
+
 # game_engine icindeki inline kural/hazirlik metinlerinin birebir kopyalari
 # (game_engine'e dokunmadan). Metin orada degisirse on-isitma sadece iska gecer — hata olmaz.
 KELIME_KURAL_TEXT = ("Kelime türetme oynayalım! Ben bir kelime söylerim. Sen de son "
@@ -78,7 +103,8 @@ HAZIR_BEKLE_TEXT = "Hazır olunca 'başla' de ya da butona dokun :)"
 
 
 def load_config() -> dict:
-    return json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+    # utf-8-sig: elle duzenlenen config Notepad/PowerShell'den BOM'lu kaydedilse de okunur.
+    return json.loads(CONFIG_PATH.read_text(encoding="utf-8-sig"))
 
 
 def save_config(cfg: dict) -> None:
@@ -232,6 +258,12 @@ def _warm_texts() -> list:
         log.warning("On-isitma: guvenli sablonlar alinamadi: %s", e)
     # 2) Sergi selamlamasi (/api/session/new sabiti).
     items.append((SESSION_GREETING_TEXT, SESSION_GREETING_JEST, SESSION_GREETING_YOGUNLUK))
+    # 2b) Test modu replikleri ('g' ile sinirli menu) — acildiginda beklenmesin.
+    try:
+        for metin in _test_mode_texts():
+            items.append((metin, SESSION_GREETING_JEST, SESSION_GREETING_YOGUNLUK))
+    except Exception as e:  # noqa: BLE001
+        log.warning("On-isitma: test modu replikleri alinamadi: %s", e)
     # 3) Oyun kural/hazirlik replikleri (game_engine sabitleri — en sik kullanilanlar).
     try:
         from game_engine import _JEST as _GJ, _TXT as _GT
@@ -362,6 +394,10 @@ def create_app(config: dict) -> Flask:
 
     bridge = LLMBridge(config, BASE_DIR)
     game = GameEngine(bridge=bridge)  # TKM deterministik; kelime turetme (ileride) LLM kullanir
+    # Test modu durumu (config.json'dan; 'g' tusu / POST /api/test_mode degistirir).
+    test_mode = {"on": bool(config.get("test_mode", False))}
+    if test_mode["on"]:
+        game.izinli_oyunlar = TEST_OYUNLAR
     # Flask threaded=True; tek GameEngine instance'i paylasiliyor. Sure-doldu ile
     # manuel cevap/AI-turu ayni anda gelirse durum makinesi bozulmasin diye seri kilit.
     game_lock = threading.Lock()
@@ -451,6 +487,7 @@ def create_app(config: dict) -> Flask:
         return jsonify({
             "max_user_input_chars": int(config.get("max_user_input_chars", 240)),
             "max_record_seconds": int(config.get("max_record_seconds", 30)),
+            "test_mode": test_mode["on"],
             # Sergi ekranindaki surekli sesli giris (VAD) ayarlari. Sergide JS'e
             # dokunmadan config.json'dan ayarlanabilsin diye burada aciga cikarilir.
             "voice_input": {
@@ -517,6 +554,16 @@ def create_app(config: dict) -> Flask:
                 "max": max_chars,
                 "len": len(text),
             }), 413
+        if test_mode["on"]:
+            # Test gunu: sohbet kapali — LLM'e gitmeden nazik oyun yonlendirmesi.
+            # (Frontend zaten oyuna yonlendirir; bu backend guvencesidir.)
+            logger.log_event("Test modu: sohbet istegi oyuna yonlendirildi")
+            return jsonify({
+                "yanit": TEST_SOHBET_KAPALI_TEXT,
+                "jest_id": SESSION_GREETING_JEST,
+                "yogunluk": 0.8,
+                "meta": {"test_mode": True},
+            })
         result = bridge.request(text)
         if result is None or "error" in result:
             err = (result or {}).get("error", "no_response")
@@ -549,6 +596,16 @@ def create_app(config: dict) -> Flask:
         temiz ve hizli bir acilis yapsin.
         """
         bridge.clear_history()
+        if test_mode["on"]:
+            # Test gunu: "merhaba" -> selamla + dogrudan oyun secimi (sohbet yok).
+            with game_lock:
+                game.exit()
+                menu = game.start()
+            menu["yanit"] = _test_greeting_yanit(menu)
+            menu["jest_id"] = SESSION_GREETING_JEST
+            menu["yogunluk"] = SESSION_GREETING_YOGUNLUK
+            logger.log_event("Yeni ziyaretci (test modu): selamlama + oyun menusu")
+            return jsonify(menu)
         with game_lock:
             game.exit()
         logger.log_event("Yeni ziyaretci: selamlama ile temiz oturum")
@@ -560,6 +617,41 @@ def create_app(config: dict) -> Flask:
             "phase": "idle",
             "buttons": [],
         })
+
+    # ——— Test modu (sergi test gunu: sinirli menu + sohbet kapali) ————————
+    @app.get("/api/test_mode")
+    def api_test_mode_get():
+        return jsonify({"on": test_mode["on"], "games": list(TEST_OYUNLAR)})
+
+    @app.post("/api/test_mode")
+    def api_test_mode_set():
+        """Test modunu ac/kapa. Body {"on": bool} verilirse o degere, verilmezse
+        toggle. Aktif oyun sifirlanir (menude eski butonlar kalmasin)."""
+        payload = request.get_json(silent=True) or {}
+        on = payload.get("on")
+        on = (not test_mode["on"]) if on is None else bool(on)
+        test_mode["on"] = on
+        with game_lock:
+            game.izinli_oyunlar = TEST_OYUNLAR if on else None
+            game.exit()
+        config["test_mode"] = on
+        # Kalicilik: diskteki config tazelenip YALNIZ bu anahtar yazilir
+        # (calisma-zamani degisikliklerini diske sizdirmamak icin). Disk bozuksa
+        # (JSONDecodeError=ValueError!) bellekteki kopyaya dusulur; kalicilik
+        # hatasi HTTP 500 uretmez — bellek durumu zaten degisti, 200 donmeli.
+        try:
+            disk = load_config()
+        except (OSError, ValueError) as e:
+            log.warning("config.json okunamadi (%s) — bellekteki kopya yazilacak", e)
+            disk = dict(config)
+        disk["test_mode"] = on
+        try:
+            save_config(disk)
+        except OSError as e:
+            log.warning("config.json yazilamadi: %s", e)
+        logger.log_event("Test modu " + ("ACIK (yalniz " + ", ".join(TEST_OYUNLAR) + ")"
+                                         if on else "KAPALI"))
+        return jsonify({"on": on, "games": list(TEST_OYUNLAR)})
 
     # ——— Oyun modu (Kelime Türetme; deterministik akis, AI kelimeleri temali havuzdan) ————
     @app.post("/api/game/start")

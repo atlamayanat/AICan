@@ -152,7 +152,9 @@ def _load_word_categories(path):
     """JSON'dan temali kategorileri yukle: {kategori: [kelime,...]}.
     Hata (yok/bozuk) -> {} (temali havuz bos kalir; _TR_COMMON_WORDS yedegi devreye girer)."""
     try:
-        data = json.loads(Path(path).read_text(encoding="utf-8"))
+        # utf-8-sig: BOM'lu dosya da kabul (Windows editorleri BOM ekleyebiliyor;
+        # strict utf-8 BOM'da patlar ve veri sessizce yedege duserdi).
+        data = json.loads(Path(path).read_text(encoding="utf-8-sig"))
         return {k: [temiz_kelime(w) for w in v if temiz_kelime(w)]
                 for k, v in data.items() if isinstance(v, list)}
     except (OSError, json.JSONDecodeError, ValueError) as e:
@@ -182,7 +184,7 @@ def _load_es_zit(path):
     """es_zit_anlam.json yukle: {kelime: {"es":[...], "zit":[...]}}.
     Hata -> {} (cagiran gomulu yedege duser)."""
     try:
-        data = json.loads(Path(path).read_text(encoding="utf-8"))
+        data = json.loads(Path(path).read_text(encoding="utf-8-sig"))
         out = {}
         for k, v in data.items():
             if not isinstance(v, dict):
@@ -222,7 +224,7 @@ _DY_FALLBACK = [
 def _load_json_list(path):
     """JSON dizi dosyasi yukle; hata/uyumsuz -> [] (cagiran gomulu yedege duser)."""
     try:
-        data = json.loads(Path(path).read_text(encoding="utf-8"))
+        data = json.loads(Path(path).read_text(encoding="utf-8-sig"))
         return data if isinstance(data, list) else []
     except (OSError, json.JSONDecodeError, ValueError) as e:
         log.warning("%s okunamadi: %s — gomulu yedek", path, e)
@@ -393,6 +395,9 @@ class GameEngine:
         # loglama sessizce atlanir — oyun akisini hicbir kosulda etkilemez.
         self.session_logger = session_logger
         self.phase = "idle"
+        # Test/sergi gunu sinirlamasi: None = tum oyunlar; ör. ("eszit","atasozu")
+        # -> menude yalnizca bunlar gorunur ve secilebilir (web_server yonetir).
+        self.izinli_oyunlar = None
         # AI'nin temali kelime havuzu: edebiyat + tarih + bilim BIRLESIMI.
         cats = categories if categories is not None else _load_word_categories(
             categories_path or _DEFAULT_CATS_PATH)
@@ -480,22 +485,31 @@ class GameEngine:
         self._reset_quiz()
         return self._menu_payload()
 
-    # ——— Menu fazi (duz 4 buton) ————————————————————————————
-    @staticmethod
-    def _menu_buttons():
-        return [
-            {"key": "kelime",      "label": "🔤 Kelime Türetme"},
-            {"key": "eszit",       "label": "🔁 Eş/Zıt Anlam"},
-            {"key": "atasozu",     "label": "📜 Atasözü"},
-            {"key": "dogruyanlis", "label": "✅ Doğru/Yanlış"},
-        ]
+    # ——— Menu fazi (duz menu; izinli_oyunlar sinirlar) ————————————
+    _MENU_TUM = (
+        {"key": "kelime",      "label": "🔤 Kelime Türetme"},
+        {"key": "eszit",       "label": "🔁 Eş/Zıt Anlam"},
+        {"key": "atasozu",     "label": "📜 Atasözü"},
+        {"key": "dogruyanlis", "label": "✅ Doğru/Yanlış"},
+    )
+
+    def _oyun_izinli(self, key: str) -> bool:
+        return self.izinli_oyunlar is None or key in self.izinli_oyunlar
+
+    def _menu_buttons(self):
+        return [dict(b) for b in self._MENU_TUM if self._oyun_izinli(b["key"])]
 
     def _menu_payload(self, reprompt=False) -> dict:
+        # Metin butonlardan turetilir; tum oyunlar izinliyken eski sabit
+        # metinlerle BIREBIR ayni kalir (TTS on-uretim cache'i bozulmasin).
+        btns = self._menu_buttons()
+        labels = " · ".join(b["label"] for b in btns)
+        adlar = [b["label"].split(" ", 1)[1] for b in btns]
+        secenekler = ((", ".join(adlar[:-1]) + " ya da " + adlar[-1])
+                      if len(adlar) > 1 else (adlar[0] if adlar else ""))
         yanit = (
-            "Hmm, tam anlamadım :) Hangisini oynayalım — Kelime Türetme, Eş/Zıt Anlam, "
-            "Atasözü ya da Doğru/Yanlış?" if reprompt else
-            "Süper! Hangisini oynayalım? Dokun ya da söyle: 🔤 Kelime Türetme · "
-            "🔁 Eş/Zıt Anlam · 📜 Atasözü · ✅ Doğru/Yanlış"
+            f"Hmm, tam anlamadım :) Hangisini oynayalım — {secenekler}?" if reprompt else
+            f"Süper! Hangisini oynayalım? Dokun ya da söyle: {labels}"
         )
         return {
             "game": "menu",
@@ -513,18 +527,24 @@ class GameEngine:
         }
 
     def _handle_menu(self, n: str) -> dict:
-        """Menuden oyun sec (buton key'i veya dogal dil). Anlasilmazsa tekrar sor."""
+        """Menuden oyun sec (buton key'i veya dogal dil). Anlasilmazsa tekrar sor.
+        izinli_oyunlar disindaki secimler de tekrar-sor'a duser (test modu)."""
         words = n.split()
-        if n in ("kelime", "1", "bir") or "kelime" in words:
+        if (n in ("kelime", "1", "bir") or "kelime" in words) and self._oyun_izinli("kelime"):
             return self._start_kelime()
-        if (n in ("eszit", "2", "iki") or "es" in words or "zit" in words
-                or "esanlam" in n or "zitanlam" in n or "anlam" in n):
+        # NOT: "anlam" TAM KELIME olarak aranir ('anlamadım' tetiklemesin —
+        # reprompt metni bizzat "tam anlamadım" diyor, ziyaretci tekrarlayabilir).
+        if ((n in ("eszit", "2", "iki") or "es" in words or "zit" in words
+                or "esanlam" in n or "zitanlam" in n or "anlam" in words)
+                and self._oyun_izinli("eszit")):
             self.quiz_provider = "eszit"
             return self._start_quiz()
-        if n in ("atasozu", "3", "uc") or "atasoz" in n or "deyim" in n:
+        if ((n in ("atasozu", "3", "uc") or "atasoz" in n or "deyim" in n)
+                and self._oyun_izinli("atasozu")):
             self.quiz_provider = "atasozu"
             return self._start_quiz()
-        if (n in ("dogruyanlis", "dy", "4", "dort") or "dogru" in n or "yanlis" in n):
+        if ((n in ("dogruyanlis", "dy", "4", "dort") or "dogru" in n or "yanlis" in n)
+                and self._oyun_izinli("dogruyanlis")):
             self.quiz_provider = "dogruyanlis"
             return self._start_quiz()
         return self._menu_payload(reprompt=True)
@@ -685,6 +705,9 @@ class GameEngine:
     def _handle_kelime_ready(self, text: str) -> dict:
         """Hazırlık fazı: 'başla'/'hazırım' gelince gerçek oyunu başlat, yoksa tekrar sor."""
         n = normalize(text)
+        # Sozlu "menü" hazirlik ekranindan ana menuye doner (quiz ile simetrik).
+        if n in ("menu", "anamenu") or "menu" in n.split():
+            return self.start()
         if n in _KEL_READY or any(w in _KEL_READY for w in n.split()):
             return self._begin_kelime()
         return self._kel_payload(
@@ -873,6 +896,9 @@ class GameEngine:
 
     def _handle_quiz_ready(self, text: str) -> dict:
         n = normalize(text)
+        # Hazir ekranindaki '🏠 Menü' butonu / sozlu "menü" ana menuye doner.
+        if n in ("menu", "anamenu") or "menu" in n.split():
+            return self.start()
         if n in _KEL_READY or any(w in _KEL_READY for w in n.split()):
             return self._begin_quiz()
         return self._quiz_payload(
@@ -927,6 +953,63 @@ class GameEngine:
     # tezahurat cevaba YAPISTIRILMAZ: onek (tezahurat/uyari) ayri cumle, "Cevap: X"
     # ayri paylasilan cumle olur; boylece her cevap TEK kez seslendirilir (cache).
     _QUIZ_DOGRU_CHEER = ("Doğru bildin!", "Harika, bildin!", "Aferin, doğru!")
+    # Yanlis-cevap onekleri iki havuz: YAKIN yalnizca cevap gercekten yakinsa
+    # (kucuk yazim farki / kismi eslesme) soylenir; digerinde NOTR havuz doner.
+    # DIKKAT: her onek EN AZ 10 karakter olmali — cumle bolucunun (SENT_MIN_LEN)
+    # kisa parcayi "Cevap: X." ile birlestirip TTS cache'ini iskalamamasi icin.
+    _QUIZ_YAKIN = ("Çok yaklaştın!", "Az kalmıştı!", "Ucundan kaçtı!")
+    _QUIZ_YANLIS = ("Olmadı bu sefer!", "Bilemedin, olsun!", "Bu biraz zordu galiba!")
+
+    @staticmethod
+    def _duzenleme_mesafesi(a: str, b: str) -> int:
+        """OSA duzenleme mesafesi (ekle/sil/degistir + komsu harf takasi=1) —
+        kisa kelimeler icin saf Python yeterli."""
+        if a == b:
+            return 0
+        if not a or not b:
+            return len(a) + len(b)
+        prev2 = None
+        prev = list(range(len(b) + 1))
+        for i, ca in enumerate(a, 1):
+            cur = [i]
+            for j, cb in enumerate(b, 1):
+                d = min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (ca != cb))
+                if prev2 is not None and j > 1 and i > 1 and ca == b[j - 2] and a[i - 2] == cb:
+                    d = min(d, prev2[j - 2] + 1)
+                cur.append(d)
+            prev2, prev = prev, cur
+        return prev[-1]
+
+    # Yakinlik tespitinde SAYILMAYAN yaygin dolgu kelimeleri (normalize edilmis):
+    # "para olur" gibi alakasiz cevaplarda tek basina "olur" yakinlik saymasin.
+    _YAKIN_STOP = frozenset({
+        "olur", "olmaz", "gelir", "gider", "eder", "etmez", "yapar", "olsun",
+        "vardir", "yoktur", "iyidir", "degildir", "kadar", "gibi", "icin", "bir",
+    })
+
+    def _quiz_yakin_mi(self, q, text: str) -> bool:
+        """Yanlis cevap gercekten 'yakin' miydi? Yakin = kabul cevabinin ayirt
+        edici bir kelimesi soylenmis (atasozu: 'göl oldu' ~ 'göl olur') YA DA
+        kucuk yazim farki var ('berayz' ~ 'beyaz'). Dogru/Yanlis'ta yakinlik
+        anlamsiz (iki secenek var) -> her zaman False."""
+        if self.quiz_provider == "dogruyanlis":
+            return False
+        un = normalize(text)
+        if not un:
+            return False
+        tokens = set(un.split())
+        for a in q["accept_norm"]:
+            a_tokens = [t for t in a.split() if len(t) >= 3 and t not in self._YAKIN_STOP]
+            if any(t in tokens for t in a_tokens):
+                return True
+            for at in a_tokens:
+                if len(at) < 4:
+                    continue  # 3 harfli tokenda mesafe-1 cok gevsek ('gol'~'yol')
+                esik = 1 if len(at) <= 5 else 2
+                if any(self._duzenleme_mesafesi(t, at) <= esik
+                       for t in tokens if t not in self._YAKIN_STOP):
+                    return True
+        return False
 
     def _handle_quiz(self, text: str, timeout: bool) -> dict:
         q = self.quiz_current
@@ -939,7 +1022,13 @@ class GameEngine:
             geri = f"{cheer} Cevap: {beklenen}."
             dogru = True
         else:
-            onek = "Süre doldu!" if timeout else "Yaklaştın!"
+            if timeout:
+                onek = "Süre doldu!"
+            else:
+                havuz = (self._QUIZ_YAKIN if q and self._quiz_yakin_mi(q, text)
+                         else self._QUIZ_YANLIS)
+                yanlis_n = self.quiz_score["toplam"] - self.quiz_score["dogru"]
+                onek = havuz[yanlis_n % len(havuz)]
             geri = f"{onek} Cevap: {beklenen}."     # "Cevap: X" cumlesi dogru/yanlis'ta ORTAK
             dogru = False
         return self._quiz_ask_next(prefix=geri, dogru_mu=dogru)

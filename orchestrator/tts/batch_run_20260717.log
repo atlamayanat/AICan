@@ -1,0 +1,77 @@
+
+=== ElevenLabs on-uretim ONIZLEME (imza-kanonik, model=eleven_flash_v2_5, 0.5 kredi/karakter) ===
+
+--- ON-URETILECEK (pre-gen) ---
+  quiz_prompts       1290 parca     49500 karakter
+  quiz_feedback      1320 parca     30294 karakter
+  word_normal        1083 parca      6477 karakter
+  word_streak         722 parca      4318 karakter
+  word_opener         361 parca      2159 karakter
+  quiz_end             92 parca      1568 karakter
+  user_lose            30 parca       612 karakter
+  retry                12 parca       412 karakter
+  ai_lose              14 parca       390 karakter
+  menu_test             6 parca       212 karakter
+  menu                  3 parca       209 karakter
+  kelime_kural          7 parca       204 karakter
+  quiz_intro:eszit      4 parca       165 karakter
+  tezahurat            18 parca       159 karakter
+  quiz_intro:atasozu      2 parca        69 karakter
+  quiz_intro:dogruyanlis      2 parca        64 karakter
+  greeting              2 parca        57 karakter
+  hazir_bekle           1 parca        45 karakter
+  guard:hayal_kirikligi      1 parca        42 karakter
+  exit                  2 parca        39 karakter
+  guard:sevgi           1 parca        36 karakter
+  guard:uzgun_yavas      1 parca        31 karakter
+  guard:ofke            1 parca        31 karakter
+  sen_basla             1 parca        29 karakter
+  guard:uzgun_derin      1 parca        29 karakter
+  guard:panik           1 parca        29 karakter
+  guard:yalniz          1 parca        27 karakter
+  guard:korku           1 parca        27 karakter
+  guard:sicaklik        1 parca        26 karakter
+  guard:dinliyorum      1 parca        22 karakter
+  guard:sikilma         1 parca        21 karakter
+  guard:sicaklik_default      1 parca        16 karakter
+  TOPLAM             4984 parca     97319 karakter  => 48,660 kredi
+
+--- SELF-HEAL kuyrugu (sergide ilk kullanimda canli) ---
+  TOPLAM                0 parca         0 karakter  => 0 kredi
+
+ONDEN uretim: 48,660 kredi   |   self-heal ust siniri: 0 kredi (yalnizca gercekten karsilasilan parcalar, 32k tavanla sinirli)
+
+Uretiliyor: 4984 benzersiz parca (voice=01p4omegjS2n3rSDCM5u)...
+
+  50/4984  yeni=32 cache=18 bos/atlanan=0 harcanan~31,330 kredi
+  200/4984  yeni=128 cache=72 bos/atlanan=0 harcanan~33,146 kredi
+  300/4984  yeni=171 cache=129 bos/atlanan=0 harcanan~33,980 kredi
+  450/4984  yeni=255 cache=195 bos/atlanan=0 harcanan~35,459 kredi
+  650/4984  yeni=359 cache=291 bos/atlanan=0 harcanan~37,376 kredi
+  800/4984  yeni=431 cache=369 bos/atlanan=0 harcanan~38,710 kredi
+  850/4984  yeni=463 cache=387 bos/atlanan=0 harcanan~39,317 kredi
+  950/4984  yeni=509 cache=441 bos/atlanan=0 harcanan~40,147 kredi
+  1050/4984  yeni=564 cache=486 bos/atlanan=0 harcanan~41,154 kredi
+  1100/4984  yeni=590 cache=510 bos/atlanan=0 harcanan~41,634 kredi
+  1200/4984  yeni=648 cache=552 bos/atlanan=0 harcanan~42,700 kredi
+  1550/4984  yeni=694 cache=856 bos/atlanan=0 harcanan~43,384 kredi
+  1600/4984  yeni=743 cache=857 bos/atlanan=0 harcanan~43,801 kredi
+  1700/4984  yeni=779 cache=921 bos/atlanan=0 harcanan~44,134 kredi
+  1750/4984  yeni=820 cache=930 bos/atlanan=0 harcanan~44,653 kredi
+  2000/4984  yeni=983 cache=1017 bos/atlanan=0 harcanan~46,933 kredi
+  2050/4984  yeni=1033 cache=1017 bos/atlanan=0 harcanan~48,079 kredi
+  2100/4984  yeni=1074 cache=1026 bos/atlanan=0 harcanan~48,628 kredi
+  2150/4984  yeni=1109 cache=1041 bos/atlanan=0 harcanan~49,137 kredi
+  2250/4984  yeni=1152 cache=1098 bos/atlanan=0 harcanan~49,511 kredi
+  2300/4984  yeni=1193 cache=1107 bos/atlanan=0 harcanan~49,971 kredi
+  2350/4984  yeni=1225 cache=1125 bos/atlanan=0 harcanan~50,312 kredi
+  2450/4984  yeni=1277 cache=1173 bos/atlanan=0 harcanan~50,900 kredi
+  2550/4984  yeni=1341 cache=1209 bos/atlanan=0 harcanan~51,476 kredi
+  2600/4984  yeni=1367 cache=1233 bos/atlanan=0 harcanan~51,671 kredi
+  2650/4984  yeni=1408 cache=1242 bos/atlanan=0 harcanan~52,134 kredi
+  2750/4984  yeni=1478 cache=1272 bos/atlanan=0 harcanan~53,286 kredi
+  2900/4984  yeni=1577 cache=1323 bos/atlanan=0 harcanan~54,768 kredi
+  3400/4984  yeni=1628 cache=1772 bos/atlanan=0 harcanan~55,246 kredi
+
+BITTI. yeni=1649 cache_isabet=3335 bos/atlanan=0  toplam_harcanan~55,464 kredi
+

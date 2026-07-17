@@ -74,6 +74,54 @@ def test_quiz_check_modes():
     check("bos", not g._quiz_check({"accept_norm": {"beyaz"}, "match": "token"}, ""))
 
 
+def test_quiz_yakinlik():
+    g = make_engine()
+    # eszit: kucuk yazim farki -> yakin; alakasiz -> degil
+    g.quiz_provider = "eszit"
+    q = {"accept_norm": {"beyaz"}, "match": "token"}
+    check("yakin: yazim farki", g._quiz_yakin_mi(q, "beyza"))
+    check("yakin degil: alakasiz", not g._quiz_yakin_mi(q, "mavi"))
+    check("yakin degil: bos", not g._quiz_yakin_mi(q, ""))
+    # atasozu: kabul cevabinin AYIRT EDICI bir kelimesi soylenmis -> yakin;
+    # tek basina "olur" gibi dolgu fiil yakinlik SAYMAZ (stopword).
+    g.quiz_provider = "atasozu"
+    qa = {"accept_norm": {"gol olur"}, "match": "substring"}
+    check("yakin: kismi eslesme", g._quiz_yakin_mi(qa, "göl oldu"))
+    check("yakin degil: atasozu alakasiz", not g._quiz_yakin_mi(qa, "bilmiyorum"))
+    check("yakin degil: dolgu fiil", not g._quiz_yakin_mi(qa, "para olur"))
+    check("yakin degil: dolgu cumle", not g._quiz_yakin_mi(qa, "hiç bilmiyorum olur mu"))
+    check("yakin degil: 3 harfte mesafe yok", not g._quiz_yakin_mi(qa, "yol"))
+    # dogruyanlis: yakinlik anlamsiz (iki secenek)
+    g.quiz_provider = "dogruyanlis"
+    qd = {"accept_norm": {"dogru", "evet"}, "match": "token"}
+    check("dy asla yakin", not g._quiz_yakin_mi(qd, "dogr"))
+
+
+def test_quiz_onek_tts_uzunlugu():
+    # Cumle bolucu (SENT_MIN_LEN=10) kisa parcayi sonraki cumleyle birlestirir;
+    # onek < 10 karakter olursa "Onek! Cevap: X." birlesik parcasi on-uretim
+    # cache'inde bulunmaz -> sergide canli TTS harcamasi. Regresyon bekcisi:
+    for s in (GameEngine._QUIZ_DOGRU_CHEER + GameEngine._QUIZ_YAKIN
+              + GameEngine._QUIZ_YANLIS + ("Süre doldu!",)):
+        check(f"onek >= 10 karakter: '{s}'", len(s) >= 10)
+
+
+def test_quiz_yanlis_onekleri():
+    # Yakin yanlis -> _QUIZ_YAKIN havuzundan; uzak yanlis -> _QUIZ_YANLIS havuzundan.
+    # Kontrollu veri: kabul cevaplari 5 harfli tek kelime (yakinlik esigi net).
+    g = GameEngine(bridge=None, word_llm=None,
+                   ea_data={"siyah": {"zit": ["beyaz"]}, "hızlı": {"zit": ["yavaş"]}},
+                   atasozu_data=list(TEST_ATA), dogru_yanlis_data=list(TEST_DY))
+    g.start(); g.handle("eszit"); g.handle("başla")
+    dogru_cevap = next(iter(g.quiz_current["accept_norm"]))
+    p = g.handle(dogru_cevap[:-1] + "x")   # son harfi boz -> yakin yanlis
+    check("yakin onek", any(p["yanit"].startswith(o) for o in GameEngine._QUIZ_YAKIN))
+    check("yakin onek cevap icerir", "Cevap:" in p["yanit"])
+    p = g.handle("qqqqq")                  # alakasiz -> notr yanlis
+    check("notr onek", any(p["yanit"].startswith(o) for o in GameEngine._QUIZ_YANLIS))
+    check("eski sabit 'Yaklaştın!' yok", not p["yanit"].startswith("Yaklaştın!"))
+
+
 # ——— Duz 4 oyunlu menu akisi ———
 def test_menu_flat_4():
     g = make_engine()
@@ -146,6 +194,56 @@ def test_invalid_menu_reprompts():
     check("gecersiz secim -> reprompt", p["kind"] == "reprompt" and p["phase"] == "menu")
 
 
+def test_menu_metinleri_degismedi():
+    # Dinamik metin uretimi, tum oyunlar izinliyken ESKI SABITLERLE birebir ayni
+    # kalmali (TTS on-uretim cache anahtarlari bozulmasin).
+    g = make_engine()
+    p = g.start()
+    check("menu metni ayni", p["yanit"] ==
+          "Süper! Hangisini oynayalım? Dokun ya da söyle: 🔤 Kelime Türetme · "
+          "🔁 Eş/Zıt Anlam · 📜 Atasözü · ✅ Doğru/Yanlış")
+    p = g.handle("asdf")
+    check("reprompt metni ayni", p["yanit"] ==
+          "Hmm, tam anlamadım :) Hangisini oynayalım — Kelime Türetme, Eş/Zıt Anlam, "
+          "Atasözü ya da Doğru/Yanlış?")
+
+
+def test_hazir_ekranindan_menuye_donus():
+    # Hazir ('basla' bekleyen) ekranindaki '🏠 Menü' butonu / sozlu "menü" calismali.
+    g = make_engine()
+    g.start(); g.handle("eszit")
+    p = g.handle("menu")
+    check("quiz hazirdan menuye", p["kind"] == "menu" and g.phase == "menu")
+    g.start(); g.handle("kelime")
+    p = g.handle("menü")
+    check("kelime hazirdan menuye", p["kind"] == "menu" and g.phase == "menu")
+
+
+def test_menu_anlamadim_tetiklemez():
+    # Reprompt metni "tam anlamadım" der; ziyaretci tekrarlarsa quiz BASLAMAMALI.
+    g = make_engine()
+    g.start()
+    p = g.handle("hiçbir şey anlamadım")
+    check("anlamadim quiz baslatmaz", p["kind"] == "reprompt")
+    p = g.handle("eş anlam")
+    check("es anlam yine secer", p["kind"] == "quiz_ready" and g.quiz_provider == "eszit")
+
+
+def test_test_modu_sinirli_menu():
+    # izinli_oyunlar: menude yalnizca izinli oyunlar; digerleri secilemez.
+    g = make_engine()
+    g.izinli_oyunlar = ("eszit", "atasozu")
+    p = g.start()
+    check("sinirli menu 2 buton", [b["key"] for b in p["buttons"]] == ["eszit", "atasozu"])
+    check("sinirli menu metni", "Kelime" not in p["yanit"] and "Eş/Zıt Anlam" in p["yanit"])
+    p = g.handle("kelime")
+    check("kelime secilemez", p["kind"] == "reprompt" and g.phase == "menu")
+    p = g.handle("dogru")
+    check("dogruyanlis secilemez", p["kind"] == "reprompt")
+    p = g.handle("atasozu")
+    check("atasozu secilir", p["kind"] == "quiz_ready" and g.quiz_provider == "atasozu")
+
+
 def test_quiz_exit():
     g = make_engine()
     g.start(); g.handle("eszit"); g.handle("başla")
@@ -178,16 +276,69 @@ def test_http_quiz():
     check("http kelime ready", p["game"] == "kelime" and p["turn"] == "hazir")
 
 
+def test_http_test_modu():
+    ws = importlib.import_module("web_server")
+    cfg = ws.load_config()
+    cfg["warmup_on_start"] = False
+    cfg["tts_enabled"] = False
+    cfg["whisper_enabled"] = False
+    cfg["test_mode"] = False
+    # save_config gercek config.json'a yazmasin (kalicilik prod ozelligi).
+    eski_save = ws.save_config
+    ws.save_config = lambda _cfg: None
+    try:
+        c = ws.create_app(cfg).test_client()
+
+        def post(u, **b):
+            return c.post(u, json=b or None).get_json()
+
+        d = post("/api/test_mode", on=True)
+        check("http test modu acildi", d["on"] is True)
+        d = c.get("/api/config").get_json()
+        check("http config test_mode", d.get("test_mode") is True)
+        # merhaba -> selamlama + dogrudan sinirli oyun menusu
+        p = post("/api/session/new")
+        check("http merhaba -> menu", p["phase"] == "menu"
+              and [b["key"] for b in p["buttons"]] == ["eszit", "atasozu"]
+              and p["yanit"].startswith("Merhaba"))
+        # sohbet kapali: LLM'e gitmeden yonlendirme
+        p = post("/api/send", text="bugün hava nasıl")
+        check("http sohbet kapali", p.get("meta", {}).get("test_mode") is True
+              and "oyun" in p.get("yanit", "").lower())
+        # menuden kelime secilemez
+        post("/api/game/start")
+        p = post("/api/game/input", text="kelime")
+        check("http kelime engellendi", p["kind"] == "reprompt")
+        # parametresiz POST -> toggle (kapat)
+        d = post("/api/test_mode")
+        check("http test modu kapandi", d["on"] is False)
+        p = post("/api/game/start")
+        check("http normal menu geri", [b["key"] for b in p["buttons"]]
+              == ["kelime", "eszit", "atasozu", "dogruyanlis"])
+        p = post("/api/session/new")
+        check("http normal selamlama geri", p["phase"] == "idle" and p["buttons"] == [])
+    finally:
+        ws.save_config = eski_save
+
+
 if __name__ == "__main__":
     test_providers()
     test_quiz_state_init()
     test_quiz_check_modes()
+    test_quiz_yakinlik()
+    test_quiz_yanlis_onekleri()
+    test_quiz_onek_tts_uzunlugu()
     test_menu_flat_4()
     test_menu_selects_each_game()
     test_quiz_full_flow_each_provider()
     test_quiz_ends_and_returns_to_menu()
     test_invalid_menu_reprompts()
+    test_hazir_ekranindan_menuye_donus()
+    test_menu_anlamadim_tetiklemez()
+    test_menu_metinleri_degismedi()
+    test_test_modu_sinirli_menu()
     test_quiz_exit()
     test_http_quiz()
+    test_http_test_modu()
     print(f"\nSonuc: {_PASS} PASS / {_FAIL} FAIL")
     sys.exit(0 if _FAIL == 0 else 1)

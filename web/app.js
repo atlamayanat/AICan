@@ -380,6 +380,45 @@
   // attract_countdown: "Hâlâ orada mısın?" + görünür geri sayım.
   // Herhangi bir gerçek etkileşim mesajı attract'ı anında kapatır.
   const ATTRACT_MSGS = ['Bana bir soru sor!', 'Benimle oyun oyna!', 'Sana uzayı anlatayım mı?'];
+  // Test modunda sohbet kapalı — davet metinleri yalnızca oyuna çağırır.
+  const ATTRACT_MSGS_TEST = ['Benimle oyun oyna!', 'Atasözü tamamlayalım mı?', 'Eş ve zıt anlamlıları bilir misin?'];
+  function attractMsgs() { return testModeOn ? ATTRACT_MSGS_TEST : ATTRACT_MSGS; }
+
+  // ——— Test modu göstergesi ('g' tuşu; durum backend'de) ————————————
+  let testModeOn = false;
+  let testBadgeEl = null;
+  function setTestBadge(on) {
+    testModeOn = !!on;
+    if (!testBadgeEl) {
+      testBadgeEl = document.createElement('div');
+      testBadgeEl.style.cssText =
+        'position:fixed;bottom:10px;left:12px;z-index:60;display:none;pointer-events:none;' +
+        'font:600 11px/1.4 monospace;letter-spacing:2px;color:rgba(255,209,102,0.55);';
+      testBadgeEl.textContent = 'TEST MODU';
+      document.body.appendChild(testBadgeEl);
+    }
+    testBadgeEl.style.display = testModeOn ? 'block' : 'none';
+  }
+  let testToggleBusy = false;
+  async function toggleTestModeFromDisplay() {
+    if (testToggleBusy) return;    // tuş basılı tutulursa istek seli olmasın
+    testToggleBusy = true;
+    try {
+      // Kör toggle yerine hedef durum: tekrar/yarış durumlarında yakınsar.
+      const r = await fetch('/api/test_mode', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ on: !testModeOn }),
+      });
+      const d = await r.json();
+      setTestBadge(!!d.on);
+      if (bc) bc.postMessage({ type: 'test_mode', on: !!d.on });  // panel de öğrensin
+    } catch (e) {
+      console.warn('test modu değiştirilemedi', e);
+    } finally {
+      testToggleBusy = false;
+    }
+  }
   const ATTRACT_CYCLE_MS = 6000;
   const ATTRACT_FADE_MS = 800;
   const ATTRACT_CANCEL = new Set([
@@ -398,15 +437,16 @@
     if (els.attractCount) els.attractCount.classList.add('hidden');
     if (els.attractMsg) {
       els.attractMsg.classList.remove('out');
-      els.attractMsg.textContent = ATTRACT_MSGS[0];
+      els.attractMsg.textContent = attractMsgs()[0];
     }
     els.attractBox.classList.remove('hidden');
     attractCycleId = setInterval(() => {
       if (!els.attractMsg) return;
       els.attractMsg.classList.add('out');               // yumuşak fade-out
       attractFadeId = setTimeout(() => {
-        attractIdx = (attractIdx + 1) % ATTRACT_MSGS.length;
-        els.attractMsg.textContent = ATTRACT_MSGS[attractIdx];
+        const msgs = attractMsgs();
+        attractIdx = (attractIdx + 1) % msgs.length;
+        els.attractMsg.textContent = msgs[attractIdx];
         els.attractMsg.classList.remove('out');           // fade-in
       }, ATTRACT_FADE_MS);
     }, ATTRACT_CYCLE_MS);
@@ -931,6 +971,15 @@
     }
   }
 
+  // Aynı /api/config yanıtından test modu durumunu da al (rozet açılışta doğru olsun).
+  async function loadTestModeState() {
+    try {
+      const r = await fetch('/api/config');
+      const d = await r.json();
+      if (d && typeof d.test_mode === 'boolean') setTestBadge(d.test_mode);
+    } catch (_) { /* rozet kapalı kalır */ }
+  }
+
   // ——— Kontrol paneli ile haberlesme ———————————————————————
   function initChannel() {
     try {
@@ -1036,6 +1085,8 @@
         stopDisplayTimer();
         hideGameOptions();
         if (els.userText) els.userText.textContent = '';
+      } else if (d.type === 'test_mode') {
+        setTestBadge(!!d.on);   // kontrol panelinden 'g' ile değişti
       }
     };
     bc.postMessage({ type: 'display_ready', mode: panel ? panel.mode : 'desen' });
@@ -1056,6 +1107,7 @@
 
   // ——— Klavye kisayollari ——————————————————————————————————
   document.addEventListener('keydown', (e) => {
+    if (e.repeat) return;   // tuş basılı tutulunca tekrar tetiklenmesin
     if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
     if (e.key === 't' || e.key === 'T') {
       if (els.testPanel) els.testPanel.classList.toggle('open');
@@ -1066,6 +1118,9 @@
     }
     if (e.key === 'd' || e.key === 'D') {
       viToggle();   // sürekli sesli giriş (dinleme) aç/kapa
+    }
+    if (e.key === 'g' || e.key === 'G') {
+      toggleTestModeFromDisplay();   // test modu: 2 oyun + sohbet kapalı
     }
     if (e.key === 's' || e.key === 'S') {
       ttsEnabled = !ttsEnabled;
@@ -1099,6 +1154,10 @@
     initChannel();
     checkTtsStatus();
     await loadVoiceInputConfig();
+    await loadTestModeState();
+    // Rozet/attract metinleri sunucu durumuyla senkron kalsın: açılış fetch'i
+    // başarısız olsa ya da mod başka yerden değişse ~10 sn'de kendini onarır.
+    setInterval(loadTestModeState, 10000);
     // Autoplay kilidini ilk etkilesimde ac (kiosk: gorevli bir kez tiklar/tusa basar)
     window.addEventListener('pointerdown', primeAudio, { once: true });
     window.addEventListener('keydown', primeAudio, { once: true });
