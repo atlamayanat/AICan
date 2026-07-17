@@ -835,16 +835,23 @@ def create_app(config: dict) -> Flask:
     return app
 
 
-def open_browsers(host: str, port: int, delay_sec: float = 1.2) -> None:
-    """Sunucu kalktiktan sonra iki sekmeyi ayni tarayicida ac."""
+def open_browsers(host: str, port: int, delay_sec: float = 1.2,
+                  open_control: bool = True) -> None:
+    """Sunucu kalktiktan sonra sekmeleri ac.
+
+    open_control=False (sergi profili: web_open_control=false): YALNIZ sergi
+    ekrani acilir — ziyaretci kontrol paneline erisemez; ekran panelsiz surucu
+    (app.js drv*) ile kendi basina calisir.
+    """
     def _open():
         import time
         time.sleep(delay_sec)
         base = f"http://{host}:{port}"
         try:
             webbrowser.open_new(f"{base}/")
-            # ikinci sekme ayni pencereye gelsin
-            webbrowser.open_new_tab(f"{base}/control")
+            if open_control:
+                # ikinci sekme ayni pencereye gelsin
+                webbrowser.open_new_tab(f"{base}/control")
         except Exception as e:
             log.warning("Tarayici acilamadi: %s — manuel ac: %s", e, base)
     threading.Thread(target=_open, daemon=True).start()
@@ -855,10 +862,14 @@ def main() -> None:
     app = create_app(config)
     host = "127.0.0.1"
     port = int(config.get("web_port", 5057))
+    open_control = bool(config.get("web_open_control", True))
     log.info("AI Body web sunucusu: http://%s:%d", host, port)
     log.info("  Sergi:          http://%s:%d/", host, port)
-    log.info("  Kontrol paneli: http://%s:%d/control", host, port)
-    open_browsers(host, port)
+    if open_control:
+        log.info("  Kontrol paneli: http://%s:%d/control", host, port)
+    else:
+        log.info("  Kontrol paneli: ACILMAYACAK (web_open_control=false — sergi modu)")
+    open_browsers(host, port, open_control=open_control)
     try:
         # use_reloader=False -> warmup ve iki sekme acmayi tek seferde calistirir
         app.run(host=host, port=port, debug=False, use_reloader=False, threaded=True)

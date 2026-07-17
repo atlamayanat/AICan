@@ -388,7 +388,10 @@
   let testModeOn = false;
   let testBadgeEl = null;
   function setTestBadge(on) {
+    const changed = testModeOn !== !!on;
     testModeOn = !!on;
+    // Backend mod değişiminde oyun durumunu sıfırlar — sürücü de senkron kalsın.
+    if (changed) { drvGamePhase = null; drvOptions = []; }
     if (!testBadgeEl) {
       testBadgeEl = document.createElement('div');
       testBadgeEl.style.cssText =
@@ -733,9 +736,10 @@
   // ——— Sürekli sesli giriş (ekran mikrofonu + VAD) ————————————————————
   // Sergi ekranında mikrofon sürekli açık kalır: AI KONUŞMUYOR/DÜŞÜNMÜYOR/
   // YAZMIYORken dinler; kişi cümlesini bitirip sustuğunda (sessizlik eşiği)
-  // segmenti otomatik Whisper'a (/api/transcribe) yollar, çıkan metni kontrol
-  // paneline BroadcastChannel ile iletir ('voice_input') — orada tıpkı yazılıp
-  // gönderilmiş gibi işlenir. Bas-tut sistemi kontrol panelinde fallback kalır.
+  // segmenti otomatik Whisper'a (/api/transcribe) yollar. Çıkan metni panel
+  // AÇIKSA BroadcastChannel'la panele iletir ('voice_input'); panel YOKSA
+  // (sergi kurulumu: yalnız bu ekran) ekran-içi sürücü (drvHandleText) işler.
+  // Bas-tut sistemi kontrol panelinde fallback kalır.
   //
   // Yankı koruması: TTS bu ekranın hoparlöründen çaldığı için, AI çıktı
   // verirken (stThinking/stSpeaking/stTyping) kayıt tamamen durur; mikrofon
@@ -836,8 +840,12 @@
       const r = await fetch('/api/transcribe', { method: 'POST', body: fd });
       const data = await r.json();
       const txt = ((data && data.text) || '').trim();
-      if (txt && bc) {
-        bc.postMessage({ type: 'voice_input', text: txt });
+      if (txt) {
+        if (bc && panelAlive()) {
+          bc.postMessage({ type: 'voice_input', text: txt });  // panel açık: oradan işlenir
+        } else {
+          drvHandleText(txt);   // panelsiz sergi: ekran-içi sürücü işler
+        }
       }
     } catch (e) {
       console.warn('VI: transkripsiyon hatası', e);
@@ -956,6 +964,7 @@
     try {
       const r = await fetch('/api/config');
       const d = await r.json();
+      if (d && d.max_user_input_chars) drvMaxChars = d.max_user_input_chars;
       const v = d && d.voice_input;
       if (!v) return;
       VI.enabled = v.enabled !== false;
@@ -980,6 +989,318 @@
     } catch (_) { /* rozet kapalı kalır */ }
   }
 
+  // ——— Panelsiz sürücü (standalone) ————————————————————————————
+  // Sergide yalnız BU EKRAN açıktır: kontrol paneli kapalıyken sesle gelen
+  // metni panelin yaptığı gibi backend'e yönlendirir (selam → yeni oturum,
+  // oyun → /api/game/*, sohbet → /api/send) ve sonuçları handleMessage ile
+  // AYNI render yolundan geçirir. Panel açıksa (ping alınıyorsa) eski akış
+  // sürer: metin panele gider, burada işlenmez — çift işleme olmaz. Kelime
+  // oyunu geri sayım otoritesi ve boşta/attract oturum sıfırlama da panel
+  // yokken buradadır (control.js'teki otoritenin birebir portu).
+  let lastPanelMsgAt = 0;
+  function panelAlive() { return (Date.now() - lastPanelMsgAt) < 6000; }
+
+  const DRV_GREETING_RE = /\b(merhaba|merhabalar|selam|selamlar|gunaydin|naber)\b|\biyi (gunler|aksamlar)\b/;
+  const DRV_NEW_SESSION_REPLY = 'Merhaba. Sohbet edebiliriz. Oyun için "oyun oynayalım" de.';
+  const DRV_HOME = [
+    { key: 'sohbet', label: 'Sohbet et' },
+    { key: 'oyun', label: 'Oyun oynayalım' },
+  ];
+  const DRV_HOME_TEST = [
+    { key: 'oyun', label: 'Oyun oynayalım' },
+  ];
+  // Test modunda boşta söylenen oyun adları (backend _handle_menu ile hizalı).
+  const DRV_TEST_GAME_WORD_RE = /atasoz|deyim|esanlam|zitanlam|\b(es|zit|anlam)\b/;
+  let drvMaxChars = 240;         // /api/config max_user_input_chars ile güncellenir
+  let drvGamePhase = null;       // null | 'menu' | 'kelime' | 'quiz' | ...
+  let drvOptions = [];           // ekrandaki seçenek butonları (ses eşleşmesi için)
+  let drvBusy = false;           // aynı anda tek metin işlensin
+  let drvTimer = { id: null, who: null, endsAt: 0 };
+  let drvLastActivityAt = Date.now();
+  let drvAttractOn = false;
+  let drvCountdownId = null;
+  const DRV_ATTRACT_AFTER_MS = 60000;
+  const DRV_RESET_PROMPT_AFTER_MS = 30000;
+  const DRV_RESET_COUNTDOWN_S = 10;
+
+  function drvSend(payload) { return handleMessage(payload || {}); }
+
+  async function drvFetchJson(url, body) {
+    const opts = { method: 'POST' };
+    if (body) {
+      opts.headers = { 'Content-Type': 'application/json' };
+      opts.body = JSON.stringify(body);
+    }
+    const r = await fetch(url, opts);
+    return r.json();
+  }
+
+  function drvNoteActivity() {
+    drvLastActivityAt = Date.now();
+    if (drvCountdownId) { clearInterval(drvCountdownId); drvCountdownId = null; }
+    drvAttractOn = false;
+  }
+
+  function drvIsGameTrigger(text) {
+    const n = normChoice(text);
+    if (n === 'oyun' || n === 'oyna' || n === 'oyun modu') return true;
+    return /\boyun\s*oyna/.test(n);
+  }
+
+  // control.js selectedOptionKey portu: söylenen metni ekrandaki butonla eşle.
+  function drvOptionKey(text, fallbackText) {
+    const explicit = normChoice(text);
+    for (const b of drvOptions) {
+      const key = String((b && b.key) || '');
+      if (explicit && explicit === normChoice(key)) return key;
+    }
+    const n = normChoice([text, fallbackText].filter(Boolean).join(' '));
+    if (!n) return '';
+    for (const b of drvOptions) {
+      const key = String((b && b.key) || '');
+      const label = normChoice([b && b.key, b && b.label].filter(Boolean).join(' '));
+      if (n === normChoice(key) || label === n || label.includes(n) || n.includes(label)) {
+        return key;
+      }
+    }
+    return normChoice(text);
+  }
+
+  function drvPublishOptions(p) {
+    const buttons = Array.isArray(p && p.buttons) ? p.buttons : [];
+    drvOptions = buttons.slice();
+    drvSend({
+      type: 'game_options',
+      visible: buttons.length > 0,
+      buttons: buttons,
+      phase: (p && p.phase) || null,
+      game: (p && p.game) || null,
+      kind: (p && p.kind) || null,
+    });
+  }
+  function drvHomeOptions() {
+    const opts = (testModeOn ? DRV_HOME_TEST : DRV_HOME).slice();
+    drvOptions = opts;
+    drvSend({
+      type: 'game_options', visible: true, buttons: opts,
+      phase: 'idle', game: null, kind: 'home',
+    });
+  }
+
+  // ——— Kelime/quiz geri sayım OTORİTESİ (panelsiz modda) ———
+  function drvStartTimer(seconds, who) {
+    drvStopTimer(false);
+    drvTimer = { id: null, who: who, endsAt: Date.now() + seconds * 1000 };
+    drvSend({ type: 'timer_start', seconds: seconds, who: who });
+    drvTimer.id = setInterval(() => {
+      if (drvTimer.endsAt - Date.now() > 0) return;
+      const wasUser = (drvTimer.who === 'user');
+      drvStopTimer();
+      if (wasUser) drvSubmitTimeout();
+    }, 100);
+  }
+  function drvStopTimer(broadcast) {
+    if (drvTimer.id) { clearInterval(drvTimer.id); drvTimer.id = null; }
+    if (broadcast !== false) drvSend({ type: 'timer_stop' });
+  }
+  async function drvSubmitTimeout() {
+    try {
+      const data = await drvFetchJson('/api/game/input', { timeout: true });
+      if (!data.error) await drvApplyPayload(data);
+    } catch (e) { console.warn('DRV: timeout bildirilemedi', e); }
+  }
+
+  async function drvAiTurn() {
+    try {
+      const data = await drvFetchJson('/api/game/ai_turn');
+      if (!data.error) await drvApplyPayload(data);
+    } catch (e) { console.warn('DRV: AI turu alınamadı', e); }
+  }
+
+  // control.js applyGamePayload portu — render mesajları yerel handleMessage'a.
+  async function drvApplyPayload(p) {
+    if (!p) return;
+    drvGamePhase = (p.phase && p.phase !== 'idle') ? p.phase : null;
+    const isTimed = (p.game === 'kelime' || p.game === 'quiz');
+    // Kullanıcı metni typewriter'ı bitsin diye kısa tampon (panel ile aynı).
+    const gap = (p.kind === 'round') ? 480
+              : (p.game === 'kelime' && p.kind === 'ai_word') ? 320 : 260;
+    await sleep(gap);
+    const rep = drvSend({
+      type: 'ai_reply',
+      jest_id: p.jest_id,
+      yanit: p.yanit || '',
+      yogunluk: p.yogunluk,
+      outcome: p.outcome || null,
+      insist: !!p.insist,
+    });
+    if (p.score) drvSend({ type: 'game_score', score: p.score, active: true });
+    drvPublishOptions(p);
+    if (isTimed) {
+      if (p.ended || !p.timer) drvStopTimer();
+      else drvStartTimer(p.timer.seconds, p.timer.who);
+      // Yalnız kelime modunda AI turu otomatik istenir (panel ile aynı; await yok).
+      if (p.game === 'kelime' && !p.ended && p.turn === 'ai') drvAiTurn();
+    }
+    if (p.ended && !isTimed) {
+      drvGamePhase = null;
+      drvSend({ type: 'game_exit' });
+    }
+    await rep;
+  }
+
+  async function drvStartGame(triggerText) {
+    drvHomeOptions();
+    drvSend({ type: 'game_option_select', key: 'oyun', text: triggerText || 'Oyun oynayalım' });
+    drvSend({ type: 'user_text', text: triggerText || 'Oyun oynayalım' });
+    drvSend({ type: 'thinking', on: true, jest: false });
+    try {
+      const data = await drvFetchJson('/api/game/start');
+      await drvApplyPayload(data);
+    } catch (e) {
+      console.warn('DRV: oyun başlatılamadı', e);
+      drvSend({ type: 'thinking', on: false });
+    }
+  }
+
+  async function drvGameInput(text, displayText) {
+    drvSend({ type: 'game_option_select', key: drvOptionKey(text, displayText), text: displayText || text });
+    drvSend({ type: 'user_text', text: displayText || text });
+    drvSend({ type: 'thinking', on: true, jest: false });
+    // Cevap gelince geri sayımı HEMEN durdur (yanlış "süre doldu" yarışını önle).
+    const wasUserWordTurn = (drvGamePhase === 'kelime' && drvTimer.who === 'user' && !!drvTimer.id);
+    drvStopTimer();
+    let thinkId = null;
+    if (wasUserWordTurn) {
+      thinkId = setTimeout(() => drvSend({ type: 'thinking', on: true, label: 'Hmm, bakıyorum…' }), 450);
+    }
+    try {
+      const data = await drvFetchJson('/api/game/input', { text: text });
+      if (thinkId) { clearTimeout(thinkId); thinkId = null; }
+      if (data.error) { drvSend({ type: 'thinking', on: false }); return; }
+      await drvApplyPayload(data);
+    } catch (e) {
+      if (thinkId) clearTimeout(thinkId);
+      console.warn('DRV: oyun girdisi işlenemedi', e);
+      drvSend({ type: 'thinking', on: false });
+    }
+  }
+
+  async function drvNewSession(text) {
+    drvGamePhase = null;
+    drvStopTimer(false);
+    drvSend({ type: 'session_reset' });
+    drvSend({ type: 'user_text', text: text });
+    drvSend({ type: 'thinking', on: true });
+    try {
+      const data = await drvFetchJson('/api/session/new');
+      if (data.error) { drvSend({ type: 'thinking', on: false }); return; }
+      if (data.phase === 'menu') {
+        // Test modu: selamlama + oyun menüsü tek payload olarak gelir.
+        await drvApplyPayload(data);
+        return;
+      }
+      const rep = drvSend({
+        type: 'ai_reply',
+        jest_id: data.jest_id || 'selamlama',
+        yanit: data.yanit || DRV_NEW_SESSION_REPLY,
+        yogunluk: data.yogunluk || 0.8,
+      });
+      drvHomeOptions();
+      await rep;
+    } catch (e) {
+      console.warn('DRV: yeni oturum açılamadı', e);
+      drvSend({ type: 'thinking', on: false });
+    }
+  }
+
+  // Ana giriş: sesle (viTranscribeAndSend) gelen metin — panelin
+  // handleVoiceInput + handleSend yolunun birebir karşılığı.
+  async function drvHandleText(text) {
+    text = (text || '').trim();
+    if (!text || drvBusy) return;
+    if (text.length > drvMaxChars) return;
+    drvBusy = true;
+    drvNoteActivity();
+    noteInteraction();
+    try {
+      if (DRV_GREETING_RE.test(normChoice(text))) {
+        await drvNewSession(text);
+        return;
+      }
+      if (drvGamePhase || testModeOn || drvIsGameTrigger(text)) {
+        if (drvGamePhase) {
+          await drvGameInput(text, null);
+        } else if (testModeOn && !drvIsGameTrigger(text) && DRV_TEST_GAME_WORD_RE.test(normChoice(text))) {
+          // Menüyü sessizce aç, söylenen oyun adını tek adımda ilet.
+          try {
+            const d = await drvFetchJson('/api/game/start');
+            drvGamePhase = (d.phase && d.phase !== 'idle') ? d.phase : null;
+          } catch (_) { /* normal yola düş */ }
+          if (drvGamePhase === 'menu') await drvGameInput(text, text);
+          else await drvStartGame(text);
+        } else {
+          await drvStartGame(text);
+        }
+        return;
+      }
+      // Serbest sohbet
+      drvHomeOptions();
+      drvSend({ type: 'game_option_select', key: 'sohbet', text: text });
+      drvSend({ type: 'user_text', text: text });
+      drvSend({ type: 'thinking', on: true });
+      const data = await drvFetchJson('/api/send', { text: text });
+      if (data.error) { drvSend({ type: 'thinking', on: false }); return; }
+      await drvSend({
+        type: 'ai_reply',
+        jest_id: data.jest_id,
+        yanit: data.yanit || '',
+        yogunluk: data.yogunluk,
+      });
+    } catch (e) {
+      console.warn('DRV: metin işlenemedi', e);
+      drvSend({ type: 'thinking', on: false });
+    } finally {
+      drvBusy = false;
+    }
+  }
+
+  // ——— Boşta/attract OTORİTESİ (panelsiz modda; control.js portu) ———
+  // Süreli tur, aktif işleme veya süren konuşma kaydı boşta sayılmaz.
+  function drvStartCountdown() {
+    if (drvCountdownId) return;
+    let left = DRV_RESET_COUNTDOWN_S;
+    drvSend({ type: 'attract_countdown', seconds: left });
+    drvCountdownId = setInterval(() => {
+      left--;
+      if (left <= 0) { drvIdleReset(); return; }
+      drvSend({ type: 'attract_countdown', seconds: left });
+    }, 1000);
+  }
+  async function drvIdleReset() {
+    if (drvCountdownId) { clearInterval(drvCountdownId); drvCountdownId = null; }
+    drvAttractOn = false;
+    drvLastActivityAt = Date.now();
+    drvGamePhase = null;
+    drvStopTimer(false);
+    // Önce backend oturumu tazele, SONRA sayfayı yenile (istek yarım kalmasın).
+    try { await drvFetchJson('/api/session/new'); } catch (_) {}
+    drvSend({ type: 'session_reset', reload: true });
+  }
+  setInterval(() => {
+    if (panelAlive()) { drvLastActivityAt = Date.now(); return; }  // otorite panelde
+    const recording = !!(viRec && viRec.state === 'recording' && viHadSpeech);
+    if (recording || drvTimer.id || drvBusy) { drvLastActivityAt = Date.now(); return; }
+    if (drvCountdownId) return;   // geri sayım kendi zamanlayıcısında
+    const idleMs = Date.now() - drvLastActivityAt;
+    if (!drvAttractOn && idleMs >= DRV_ATTRACT_AFTER_MS) {
+      drvAttractOn = true;
+      drvSend({ type: 'attract_on' });
+    } else if (drvAttractOn && idleMs >= DRV_ATTRACT_AFTER_MS + DRV_RESET_PROMPT_AFTER_MS) {
+      drvStartCountdown();
+    }
+  }, 1000);
+
   // ——— Kontrol paneli ile haberlesme ———————————————————————
   function initChannel() {
     try {
@@ -988,8 +1309,19 @@
       console.warn('BroadcastChannel desteklenmiyor', e);
       return;
     }
-    bc.onmessage = async (e) => {
-      const d = e.data || {};
+    bc.onmessage = (e) => {
+      lastPanelMsgAt = Date.now();   // gelen her mesaj panelden — canlılık takibi
+      handleMessage(e.data || {});
+    };
+    bc.postMessage({ type: 'display_ready', mode: panel ? panel.mode : 'desen' });
+    setInterval(() => bc.postMessage({
+      type: 'display_ready', mode: panel ? panel.mode : 'desen',
+    }), 4000);
+  }
+
+  // Panelden VEYA panelsiz sürücüden (drv*) gelen mesajların ORTAK işleyicisi.
+  // Sürücü doğrudan çağırır; böylece render/TTS/rozet yolu iki modda da aynıdır.
+  async function handleMessage(d) {
       // Herhangi bir gerçek etkileşim mesajı attract modunu anında kapatır.
       if (ATTRACT_CANCEL.has(d.type)) attractHide();
       if (d.type === 'ping') {
@@ -1088,11 +1420,6 @@
       } else if (d.type === 'test_mode') {
         setTestBadge(!!d.on);   // kontrol panelinden 'g' ile değişti
       }
-    };
-    bc.postMessage({ type: 'display_ready', mode: panel ? panel.mode : 'desen' });
-    setInterval(() => bc.postMessage({
-      type: 'display_ready', mode: panel ? panel.mode : 'desen',
-    }), 4000);
   }
 
   async function loadEmojiManifest() {

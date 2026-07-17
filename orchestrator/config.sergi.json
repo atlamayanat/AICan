@@ -39,5 +39,14 @@
   "tts_elevenlabs_api_key": "",
   "tts_elevenlabs_model": "eleven_flash_v2_5",
   "tts_elevenlabs_language": "tr",
-  "tts_elevenlabs_monthly_credit_cap": 32000
+  "tts_elevenlabs_monthly_credit_cap": 32000,
+  "voice_input_enabled": true,
+  "voice_input_autostart": true,
+  "voice_input_silence_ms": 800,
+  "voice_input_min_speech_ms": 350,
+  "voice_input_max_utterance_ms": 12000,
+  "voice_input_onset_mult": 2.2,
+  "voice_input_abs_min_rms": 0.012,
+  "voice_input_cooldown_ms": 400,
+  "web_open_control": false
 }
