@@ -747,7 +747,10 @@ def create_app(config: dict) -> Flask:
                     io.BytesIO(audio_bytes),
                     language=WHISPER_LANGUAGE,
                     vad_filter=True,
-                    beam_size=1,             # CPU'da hizli kalmasi icin
+                    # Dogruluk icin beam arama (eski greedy=1 oto-VAD parcali sesinde
+                    # cok yanlis okuyordu). config.whisper_beam_size ile ayarlanir;
+                    # CPU/small'da 5 ~1 sn ek gecikme getirir, sergide dogruluk onceliklidir.
+                    beam_size=int(config.get("whisper_beam_size", 5)),
                     condition_on_previous_text=False,
                 )
                 text = " ".join(seg.text.strip() for seg in segments).strip()
