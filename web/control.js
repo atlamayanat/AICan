@@ -35,6 +35,7 @@
     connText: $('#conn-text'),
     clock: $('#clock'),
     modeToggle: $('#mode-toggle'),
+    immersiveToggle: $('#immersive-toggle'),
     micBtn: $('#mic-btn'),
     micStatus: $('#mic-status'),
     charCount: $('#char-count'),
@@ -452,6 +453,27 @@
   function toggleMode() {
     applyMode(currentMode === 'emoji' ? 'desen' : 'emoji', true);
   }
+
+  // ——— Tam ekran (immersive) göz modu — sergi ekranını yönetir ————
+  // Açıkken sergi ekranında yalnız LED göz kalır (yazılar/çerçeveler gizli).
+  // Tercih localStorage'da (sergi ekranıyla paylaşımlı); butonla ya da I tuşuyla.
+  let immersive = false;
+  function applyImmersive(on, broadcast) {
+    immersive = !!on;
+    if (els.immersiveToggle) {
+      els.immersiveToggle.textContent = 'TAM EKRAN: ' + (immersive ? 'AÇIK' : 'KAPALI');
+      els.immersiveToggle.classList.toggle('on', immersive);
+    }
+    try { localStorage.setItem('aibody.immersive', immersive ? '1' : '0'); } catch (_) {}
+    if (broadcast) {
+      sendToDisplay({ type: 'immersive', on: immersive });
+      log('sys', 'tam ekran göz modu: ' + (immersive ? 'açık' : 'kapalı'));
+    }
+  }
+  function loadStoredImmersive() {
+    try { return localStorage.getItem('aibody.immersive') === '1'; } catch (_) { return false; }
+  }
+  function toggleImmersive() { applyImmersive(!immersive, true); }
 
   // ——— Mikrofon (bas-bırak) ————————————————————————————
   function setMicStatus(text, cls) {
@@ -1319,6 +1341,7 @@
     await loadEmojiManifest();
     await loadServerConfig();
     applyMode(loadStoredMode(), false);
+    applyImmersive(loadStoredImmersive(), false);   // buton metnini kalıcı tercihe göre kur
     buildGestureGrid();
     initChannel();
     refreshModels();
@@ -1342,6 +1365,7 @@
     if (els.refreshBtn) els.refreshBtn.addEventListener('click', refreshModels);
     if (els.downloadBtn) els.downloadBtn.addEventListener('click', downloadModel);
     if (els.modeToggle) els.modeToggle.addEventListener('click', toggleMode);
+    if (els.immersiveToggle) els.immersiveToggle.addEventListener('click', toggleImmersive);
 
     initMic();
 
@@ -1351,13 +1375,17 @@
       if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
       if (e.key === 'm' || e.key === 'M') toggleMode();
       if (e.key === 'g' || e.key === 'G') toggleTestMode();
+      if (e.key === 'i' || e.key === 'I' || e.key === 'ı' || e.key === 'İ') toggleImmersive();
     });
 
-    // Sergi ekranı bağlandığında mevcut modu ona da gönder (geç açılırsa)
-    setTimeout(() => sendToDisplay({ type: 'set_mode', mode: currentMode }), 800);
+    // Sergi ekranı bağlandığında mevcut mod + tam ekran durumunu ona da gönder (geç açılırsa)
+    setTimeout(() => {
+      sendToDisplay({ type: 'set_mode', mode: currentMode });
+      sendToDisplay({ type: 'immersive', on: immersive });
+    }, 800);
 
     log('sys', 'kontrol paneli hazir');
-    log('sys', 'enter ile gonder · m ile mod degis · g ile test modu (2 oyun)');
+    log('sys', 'enter ile gonder · m ile mod degis · g ile test modu · i ile tam ekran');
 
     if (els.statThink) els.statThink.textContent = '— sn';
     if (els.statLoad) els.statLoad.textContent = '— sn';

@@ -821,6 +821,26 @@
       transform: scale(min(calc(100vw / 1920), calc(100vh / 1080)));
     }
   }
+
+  /* ——— TAM EKRAN (immersive) modu — kontrol panelinden açılır ————————————
+     #stage.immersive: üst/alt şerit, yan konuşma kutuları (SOL #user-text +
+     SAĞ #ai-text) ve LED çerçeve süsleri gizlenir; ortadaki LED göz stage'i
+     (1920×1080) kaplar. Göz app.js'te panel.resize(1080) ile NET büyütülür —
+     CSS ölçekleme değil (bulanıklık yok). 'i' tuşu ya da panel butonuyla açılır. */
+  #stage.immersive .top-bar,
+  #stage.immersive .bottom-bar,
+  #stage.immersive .side.left,
+  #stage.immersive .side.right,
+  #stage.immersive .controls { display: none !important; }
+  #stage.immersive::before { display: none; }                  /* arka grid çizgileri */
+  #stage.immersive .main { inset: 0; padding: 0; grid-template-columns: 1fr; }
+  #stage.immersive .led-frame::before,
+  #stage.immersive .led-frame::after { display: none; }         /* dönen halka + kenarlık */
+  #stage.immersive .led-frame { width: auto; height: auto; }
+  #stage.immersive .led-body {
+    width: auto; height: auto; padding: 0;
+    background: transparent; box-shadow: none; border-radius: 0;
+  }
 </style>
 </head>
 <body>

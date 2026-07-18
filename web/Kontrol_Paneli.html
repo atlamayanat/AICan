@@ -206,6 +206,15 @@
   .mode-toggle.emoji:hover {
     box-shadow: 0 0 10px oklch(0.72 0.26 340 / 0.45);
   }
+  /* Tam ekran modu AÇIK: amber vurgu (mod butonundan ayrışsın) */
+  .mode-toggle.on {
+    background: oklch(0.30 0.16 80 / 0.55);
+    border-color: oklch(0.85 0.16 80);
+    color: oklch(0.90 0.14 85);
+  }
+  .mode-toggle.on:hover {
+    box-shadow: 0 0 10px oklch(0.85 0.16 80 / 0.45);
+  }
 
   /* Main grid — kompakt */
   .main {
@@ -635,6 +644,7 @@
       </div>
       <div class="top-right">
         <button class="mode-toggle" id="mode-toggle" title="Görsel modunu değiştir (M)">GÖRSEL: DESEN</button>
+        <button class="mode-toggle" id="immersive-toggle" title="Sergi ekranında tam ekran göz modu — yalnız göz, yazılar gizli (I)">TAM EKRAN: KAPALI</button>
         <div class="conn">
           <span class="dot" id="conn-dot"></span>
           <span id="conn-text">SERGİ EKRANI ARANIYOR</span>

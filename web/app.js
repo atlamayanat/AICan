@@ -38,6 +38,9 @@
   };
 
   let panel;
+  let immersiveOn = false;            // tam ekran (immersive) göz modu açık mı
+  let ledBaseSize = 876;              // normal LED boyutu (init'te canvas'tan alınır)
+  const LED_IMMERSIVE_SIZE = 1080;    // immersive'de göz boyutu (stage yüksekliği = tüm ekran)
   let gestures = [];
   let gestureMap = new Map();
   let activeTypewriter = null;
@@ -1419,6 +1422,8 @@
         if (els.userText) els.userText.textContent = '';
       } else if (d.type === 'test_mode') {
         setTestBadge(!!d.on);   // kontrol panelinden 'g' ile değişti
+      } else if (d.type === 'immersive') {
+        setImmersive(!!d.on);   // kontrol panelinden tam ekran göz modu
       }
   }
 
@@ -1430,6 +1435,20 @@
     } catch (e) {
       console.warn('emoji manifest yuklenemedi:', e);
     }
+  }
+
+  // ——— Tam ekran (immersive) göz modu ————————————————————————————
+  // Kontrol panelinden ('immersive' mesajı) ya da 'i' tuşuyla açılır. #stage'e
+  // .immersive sınıfı eklenir (CSS: şeritler + yan yazı kutuları + çerçeve süsleri
+  // gizlenir) ve LED göz panel.resize ile NET büyütülür; kapanınca normale döner.
+  // Tercih localStorage'da tutulur (kontrol paneliyle paylaşımlı, reload'da korunur).
+  function setImmersive(on) {
+    on = !!on;
+    immersiveOn = on;
+    const stage = document.getElementById('stage');
+    if (stage) stage.classList.toggle('immersive', on);
+    if (panel) panel.resize(on ? LED_IMMERSIVE_SIZE : ledBaseSize);
+    try { localStorage.setItem('aibody.immersive', on ? '1' : '0'); } catch (_) {}
   }
 
   // ——— Klavye kisayollari ——————————————————————————————————
@@ -1454,6 +1473,9 @@
       if (!ttsEnabled) stopSpeech();   // calan ses + kuyruk + bekleyen parcalar
       if (els.statusText) els.statusText.textContent = ttsEnabled ? 'BAGLI' : 'BAGLI · SES KAPALI';
     }
+    if (e.key === 'i' || e.key === 'I' || e.key === 'ı' || e.key === 'İ') {
+      setImmersive(!immersiveOn);   // tam ekran göz modu aç/kapa
+    }
   });
 
   // ——— Init ————————————————————————————————————————————————
@@ -1471,12 +1493,15 @@
 
   async function init() {
     const size = els.canvas && els.canvas.width ? els.canvas.width : 560;
+    ledBaseSize = size;
     panel = new LEDPanel(els.canvas, { size });
 
     initStars();
     await loadGestures();
     await loadEmojiManifest();
     applyMode(loadStoredMode());
+    // Kalıcı tam ekran (immersive) tercihi (localStorage; kontrol paneliyle paylaşımlı)
+    try { if (localStorage.getItem('aibody.immersive') === '1') setImmersive(true); } catch (_) {}
     buildTestPanel();
     initChannel();
     checkTtsStatus();
