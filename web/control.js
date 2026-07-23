@@ -496,11 +496,11 @@
       const d = await r.json();
       if (d.ready) {
         whisperReady = true;
-        if (micEnabled) {
-          setMicStatus('mikrofon hazır — basılı tut, konuş', 'ok');
-        } else {
-          setMicStatus('mikrofon erisimi yok', 'error');
-        }
+        // micEnabled ilk basışa kadar false'tur — bu "erişim yok" demek DEĞİL
+        // (izin ilk basışta istenir/kiosk'ta otomatiktir). Yanıltıcı kırmızı
+        // "mikrofon erisimi yok" yerine hazır mesajı göster; gerçek ret zaten
+        // ensureMicStream'de "mikrofon reddedildi / yok" olarak raporlanır.
+        setMicStatus('mikrofon hazır — basılı tut, konuş', 'ok');
         log('sys', 'whisper modeli hazır (' + d.model + ')');
         return true;
       }

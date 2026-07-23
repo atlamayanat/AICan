@@ -49,5 +49,5 @@
   "voice_input_abs_min_rms": 0.012,
   "voice_input_cooldown_ms": 400,
   "web_kiosk_browser": true,
-  "test_mode": false
+  "test_mode": true
 }

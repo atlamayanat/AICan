@@ -136,6 +136,10 @@
     if (activeTypewriter && activeTypewriter.id) {
       clearInterval(activeTypewriter.id);
       if (activeTypewriter.el === els.aiText) { stTyping = false; updateStateBadge(); }
+      // KRİTİK: kesilen daktilonun promise'i de çözülsün — yoksa onu await
+      // eden zincir (drvApplyPayload → drvBusy) SONSUZA DEK asılı kalır ve
+      // sürücü sonraki tüm sesli girdileri yok sayar ("mikrofon öldü" belirtisi).
+      if (activeTypewriter.resolve) { try { activeTypewriter.resolve(); } catch (_) {} }
     }
     const ms = (typeof speed === 'number') ? speed : adaptiveTypeSpeed(text);
     el.textContent = '';
@@ -153,7 +157,7 @@
         }
         el.textContent += text[i++];
       }, ms);
-      activeTypewriter = { el, id };
+      activeTypewriter = { el, id, resolve };
     });
   }
 
@@ -904,7 +908,7 @@
     // çalarken viGated() kaydı durdurur, selam sonrası phase='menu'
     // olduğundan koşul tekrar sağlanmaz.
     if (viHadSpeech && (now - viSpeechStartAt) >= VI.minSpeechMs
-        && testModeOn && !panelAlive() && !drvGamePhase && !drvBusy) {
+        && testModeOn && !panelAlive() && !drvGamePhase && !drvBusyActive()) {
       viStopRecorder('discard');
       drvInstantGreet();
       return;
@@ -1039,6 +1043,19 @@
   let drvGamePhase = null;       // null | 'menu' | 'kelime' | 'quiz' | ...
   let drvOptions = [];           // ekrandaki seçenek butonları (ses eşleşmesi için)
   let drvBusy = false;           // aynı anda tek metin işlensin
+  // Sigorta: beklenmedik bir asılı promise drvBusy'yi kilitlerse sürücü sağır
+  // kalmasın — 15 sn'den eski busy bayat sayılır ve kilit açılır.
+  let drvBusyAt = 0;
+  const DRV_BUSY_STALE_MS = 15000;
+  function drvBusyActive() {
+    if (!drvBusy) return false;
+    if (Date.now() - drvBusyAt > DRV_BUSY_STALE_MS) {
+      console.warn('DRV: busy bayatladı — sigorta kilidi açtı');
+      drvBusy = false;
+      return false;
+    }
+    return true;
+  }
   let drvTimer = { id: null, who: null, endsAt: 0 };
   let drvLastActivityAt = Date.now();
   let drvAttractOn = false;
@@ -1220,8 +1237,9 @@
   // Test modu (panelsiz): ses duyulur duyulmaz, çeviri beklemeden selamla.
   // viMonitorTick tetikler; drvBusy eşzamanlı ikinci tetiği/çeviriyi keser.
   async function drvInstantGreet() {
-    if (drvBusy) return;
+    if (drvBusyActive()) return;
     drvBusy = true;
+    drvBusyAt = Date.now();
     drvNoteActivity();
     noteInteraction();
     try {
@@ -1265,9 +1283,10 @@
   // handleVoiceInput + handleSend yolunun birebir karşılığı.
   async function drvHandleText(text) {
     text = (text || '').trim();
-    if (!text || drvBusy) return;
+    if (!text || drvBusyActive()) return;
     if (text.length > drvMaxChars) return;
     drvBusy = true;
+    drvBusyAt = Date.now();
     drvNoteActivity();
     noteInteraction();
     try {
@@ -1333,7 +1352,7 @@
   setInterval(() => {
     if (panelAlive()) { drvLastActivityAt = Date.now(); return; }  // otorite panelde
     const recording = !!(viRec && viRec.state === 'recording' && viHadSpeech);
-    if (recording || drvTimer.id || drvBusy) { drvLastActivityAt = Date.now(); return; }
+    if (recording || drvTimer.id || drvBusyActive()) { drvLastActivityAt = Date.now(); return; }
     if (drvCountdownId) return;   // geri sayım kendi zamanlayıcısında
     const idleMs = Date.now() - drvLastActivityAt;
     if (!drvAttractOn && idleMs >= DRV_ATTRACT_AFTER_MS) {
