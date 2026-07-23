@@ -36,6 +36,7 @@
     clock: $('#clock'),
     modeToggle: $('#mode-toggle'),
     immersiveToggle: $('#immersive-toggle'),
+    testToggle: $('#test-toggle'),
     micBtn: $('#mic-btn'),
     micStatus: $('#mic-status'),
     charCount: $('#char-count'),
@@ -49,6 +50,8 @@
   let currentMode = 'desen'; // 'desen' | 'emoji'
   const NEW_SESSION_REPLY = 'Merhaba. Sohbet edebiliriz. Oyun için "oyun oynayalım" de.';
   const GREETING_RE = /\b(merhaba|merhabalar|selam|selamlar|gunaydin|naber)\b|\biyi (gunler|aksamlar)\b/;
+  // Test modu: oyun bitince bitiş mesajı okunup gösterilsin, sonra göz moduna dön.
+  const TEST_END_LINGER_MS = 4000;
   const HOME_OPTIONS = [
     { key: 'sohbet', label: 'Sohbet et' },
     { key: 'oyun', label: 'Oyun oynayalım' },
@@ -83,6 +86,10 @@
     const changed = testMode !== !!on;
     testMode = !!on;
     ensureTestBadge().style.display = testMode ? 'block' : 'none';
+    if (els.testToggle) {
+      els.testToggle.textContent = 'TEST: ' + (testMode ? 'AÇIK' : 'KAPALI');
+      els.testToggle.classList.toggle('on', testMode);
+    }
     if (changed) {
       // Backend oyun durumunu sıfırladı — panelde eski butonlar kalmasın.
       gamePhase = null;
@@ -762,6 +769,21 @@
       return;
     }
 
+    // ——— TEST MODU: yalnızca oyun (sohbet yok). Boşta/göz modunda HERHANGİ bir
+    // girdi selamlar + oyun menüsünü açar; oyun/menü aktifken girdi seçim/cevaptır.
+    if (testMode) {
+      if (gamePhase) {
+        log('user', '> ' + text);
+        els.prompt.value = '';
+        updateCharCount();
+        await submitGameInput(text, null);
+        els.prompt.focus();
+      } else {
+        await startNewVisitorSession(text);   // göz modundan: her girdi en başa (selam+menü)
+      }
+      return;
+    }
+
     // Yeni ziyaretçi selamı, aktif oyun dahil her şeyden önce temiz başlangıç açar.
     if (isNewSessionGreeting(text)) {
       await startNewVisitorSession(text);
@@ -770,21 +792,12 @@
 
     // ——— Oyun modu yönlendirmesi ———
     // Aktif oyun varsa girdi oyuna gider; "OYUN OYNAYALIM" hazır komutu oyunu başlatır.
-    // Test modunda sohbet kapalı: HER girdi oyun akışına gider; ziyaretçi boşta
-    // doğrudan oyun adı söylediyse ("atasözü!") menü adımı atlanıp seçim iletilir.
-    if (gamePhase || testMode || isGameTrigger(text)) {
+    if (gamePhase || isGameTrigger(text)) {
       log('user', '> ' + text);
       els.prompt.value = '';
       updateCharCount();
-      if (gamePhase) {
-        await submitGameInput(text, null);
-      } else if (testMode && !isGameTrigger(text) && TEST_GAME_WORD_RE.test(normalizeTr(text))) {
-        try { await startGameQuiet(); } catch (_) {}
-        if (gamePhase === 'menu') await submitGameInput(text, text);
-        else await startGame(text);   // sessiz başlatma olmadıysa normal yol
-      } else {
-        await startGame(text);
-      }
+      if (gamePhase) await submitGameInput(text, null);
+      else await startGame(text);
       els.prompt.focus();
       return;
     }
@@ -905,19 +918,6 @@
     const n = normalizeTr(text);
     if (n === 'oyun' || n === 'oyna' || n === 'oyun modu') return true;
     return /\boyun\s*oyna/.test(n);
-  }
-
-  // Test modunda boşta söylenen oyun adları (backend _handle_menu ile hizalı;
-  // "anlamadım" tetiklemesin diye es/zit/anlam tam kelime aranır).
-  const TEST_GAME_WORD_RE = /atasoz|deyim|esanlam|zitanlam|\b(es|zit|anlam)\b/;
-
-  // Menüyü SESSİZCE aç (ekrana menü mesajı basmadan): ziyaretçinin söylediği
-  // oyun adını tek adımda iletebilmek için ara durak.
-  async function startGameQuiet() {
-    const r = await fetch('/api/game/start', { method: 'POST' });
-    const data = await r.json();
-    gamePhase = (data.phase && data.phase !== 'idle') ? data.phase : null;
-    return data;
   }
 
   async function startGame(triggerText) {
@@ -1050,8 +1050,16 @@
     }
 
     if (p.ended) {
-      if (isTimed) {
-        // Kelime/Eş-Zıt maçı bitti: timer dur, "Yeni oyun/Çıkış" + skor kalır.
+      if (testMode) {
+        // Test modu: her oyun bitişinde göz moduna dön (bitiş mesajı okunsun, sonra).
+        // gamePhase hemen boşalır ki bu sırada gelen girdi en başa (selam+menü) gitsin.
+        stopWordTimer();
+        gamePhase = null;
+        setTimeout(() => {
+          if (!gamePhase) { sendToDisplay({ type: 'game_exit' }); hideGameUI(); }
+        }, TEST_END_LINGER_MS);
+      } else if (isTimed) {
+        // Normal: Kelime/Eş-Zıt maçı bitti — timer dur, "Yeni oyun/Çıkış" + skor kalır.
         stopWordTimer();
       } else {
         gamePhase = null;
@@ -1366,6 +1374,7 @@
     if (els.downloadBtn) els.downloadBtn.addEventListener('click', downloadModel);
     if (els.modeToggle) els.modeToggle.addEventListener('click', toggleMode);
     if (els.immersiveToggle) els.immersiveToggle.addEventListener('click', toggleImmersive);
+    if (els.testToggle) els.testToggle.addEventListener('click', toggleTestMode);
 
     initMic();
 

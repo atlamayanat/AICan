@@ -935,6 +935,14 @@
       viData = new Float32Array(viAnalyser.fftSize);
       src.connect(viAnalyser);       // destination'a BAĞLAMA → geri besleme yok
       if (viCtx.state === 'suspended') viCtx.resume().catch(() => {});
+      if (viCtx.state === 'suspended') {
+        // Jestsiz açılışta tarayıcı AudioContext'i askıda tutabilir (autoplay
+        // politikası): analyser hep 0 okur, VAD sağır kalır. İlk etkileşimde
+        // devam ettir — kiosk bayrağıyla açılan tarayıcıda bu duruma düşülmez.
+        const viResumeCtx = () => { if (viCtx && viCtx.state === 'suspended') viCtx.resume().catch(() => {}); };
+        window.addEventListener('pointerdown', viResumeCtx, { once: true });
+        window.addEventListener('keydown', viResumeCtx, { once: true });
+      }
     } catch (e) {
       console.warn('VI: AudioContext kurulamadı', e);
       viDisable();
@@ -1012,8 +1020,6 @@
   const DRV_HOME_TEST = [
     { key: 'oyun', label: 'Oyun oynayalım' },
   ];
-  // Test modunda boşta söylenen oyun adları (backend _handle_menu ile hizalı).
-  const DRV_TEST_GAME_WORD_RE = /atasoz|deyim|esanlam|zitanlam|\b(es|zit|anlam)\b/;
   let drvMaxChars = 240;         // /api/config max_user_input_chars ile güncellenir
   let drvGamePhase = null;       // null | 'menu' | 'kelime' | 'quiz' | ...
   let drvOptions = [];           // ekrandaki seçenek butonları (ses eşleşmesi için)
@@ -1025,6 +1031,8 @@
   const DRV_ATTRACT_AFTER_MS = 60000;
   const DRV_RESET_PROMPT_AFTER_MS = 30000;
   const DRV_RESET_COUNTDOWN_S = 10;
+  // Test modu: oyun bitince bitiş mesajı okunup gösterilsin, sonra göz moduna dön.
+  const DRV_TEST_END_LINGER_MS = 4000;
 
   function drvSend(payload) { return handleMessage(payload || {}); }
 
@@ -1148,6 +1156,11 @@
     if (p.ended && !isTimed) {
       drvGamePhase = null;
       drvSend({ type: 'game_exit' });
+    } else if (p.ended && testModeOn) {
+      // Test modu: süreli oyun (quiz) bitti — bitiş mesajı okunsun, sonra göz moduna dön.
+      // drvGamePhase hemen boşalır ki bu sırada gelen ses en başa (selam+menü) gitsin.
+      drvGamePhase = null;
+      setTimeout(() => { if (!drvGamePhase) drvSend({ type: 'game_exit' }); }, DRV_TEST_END_LINGER_MS);
     }
     await rep;
   }
@@ -1227,27 +1240,23 @@
     drvNoteActivity();
     noteInteraction();
     try {
+      // ——— TEST MODU: yalnizca oyun (sohbet yok). Bosta/goz modunda HERHANGI bir
+      // ses selamlar + oyun menusunu acar; oyun/menu aktifken girdi secim/cevaptir.
+      if (testModeOn) {
+        if (drvGamePhase) await drvGameInput(text, null);
+        else await drvNewSession(text);   // goz modundan: her ses en basa doner (selam+menu)
+        return;
+      }
       if (DRV_GREETING_RE.test(normChoice(text))) {
         await drvNewSession(text);
         return;
       }
-      if (drvGamePhase || testModeOn || drvIsGameTrigger(text)) {
-        if (drvGamePhase) {
-          await drvGameInput(text, null);
-        } else if (testModeOn && !drvIsGameTrigger(text) && DRV_TEST_GAME_WORD_RE.test(normChoice(text))) {
-          // Menüyü sessizce aç, söylenen oyun adını tek adımda ilet.
-          try {
-            const d = await drvFetchJson('/api/game/start');
-            drvGamePhase = (d.phase && d.phase !== 'idle') ? d.phase : null;
-          } catch (_) { /* normal yola düş */ }
-          if (drvGamePhase === 'menu') await drvGameInput(text, text);
-          else await drvStartGame(text);
-        } else {
-          await drvStartGame(text);
-        }
+      if (drvGamePhase || drvIsGameTrigger(text)) {
+        if (drvGamePhase) await drvGameInput(text, null);
+        else await drvStartGame(text);
         return;
       }
-      // Serbest sohbet
+      // Serbest sohbet (yalnizca normal mod; test modu yukarida ele alindi)
       drvHomeOptions();
       drvSend({ type: 'game_option_select', key: 'sohbet', text: text });
       drvSend({ type: 'user_text', text: text });
@@ -1513,10 +1522,15 @@
     // Autoplay kilidini ilk etkilesimde ac (kiosk: gorevli bir kez tiklar/tusa basar)
     window.addEventListener('pointerdown', primeAudio, { once: true });
     window.addEventListener('keydown', primeAudio, { once: true });
-    // Surekli sesli giris: mic izni bir kullanici jesti ister. Ilk dokunusta
-    // (gorevlinin ekrana ilk tiklamasi) kendiliginden baslat. 'd' ile ac/kapa.
+    // Surekli sesli giris: sayfa acilir ACILMAZ dene — kiosk tarayicisi
+    // (--use-fake-ui-for-media-stream) izni otomatik verir, normal tarayicida da
+    // izin daha once "her zaman" verildiyse jest gerekmez. Reddedilir/soru
+    // cikarsa ilk ETKILESIM (dokunma/tus) yedegi devreye girer. 'd' ile ac/kapa.
     if (VI.enabled && VI.autostart) {
-      window.addEventListener('pointerdown', () => viEnable(), { once: true });
+      const startVI = () => viEnable();
+      window.addEventListener('pointerdown', startVI, { once: true });
+      window.addEventListener('keydown', startVI, { once: true });
+      viEnable();
     }
 
     if (els.controls) els.controls.style.display = 'none';

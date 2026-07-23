@@ -398,6 +398,11 @@ class GameEngine:
         # Test/sergi gunu sinirlamasi: None = tum oyunlar; ör. ("eszit","atasozu")
         # -> menude yalnizca bunlar gorunur ve secilebilir (web_server yonetir).
         self.izinli_oyunlar = None
+        # Sesli-yalniz (sergi test gunu): True ise oyun metinleri "butona dokun"
+        # yerine yalniz "basla" der ve aksiyon butonlari (Basla/Menu/Cikis) gizlenir.
+        # Menu secim butonlari (Es/Zit, Atasozu) gorsel ipucu olarak KALIR.
+        # web_server test_mode ile birlikte yonetir; normal modda davranis degismez.
+        self.voice_only = False
         # AI'nin temali kelime havuzu: edebiyat + tarih + bilim BIRLESIMI.
         cats = categories if categories is not None else _load_word_categories(
             categories_path or _DEFAULT_CATS_PATH)
@@ -507,9 +512,10 @@ class GameEngine:
         adlar = [b["label"].split(" ", 1)[1] for b in btns]
         secenekler = ((", ".join(adlar[:-1]) + " ya da " + adlar[-1])
                       if len(adlar) > 1 else (adlar[0] if adlar else ""))
+        soyle = "Söyle" if self.voice_only else "Dokun ya da söyle"
         yanit = (
             f"Hmm, tam anlamadım :) Hangisini oynayalım — {secenekler}?" if reprompt else
-            f"Süper! Hangisini oynayalım? Dokun ya da söyle: {labels}"
+            f"Süper! Hangisini oynayalım? {soyle}: {labels}"
         )
         return {
             "game": "menu",
@@ -848,14 +854,17 @@ class GameEngine:
         return payload
 
     # ——— Bilgi Yarismasi (ortak quiz motoru: es-zit/atasozu/dogru-yanlis) ————
-    @staticmethod
-    def _quiz_ready_buttons():
+    def _quiz_ready_buttons(self):
+        # Sesli-yalniz (sergi test gunu): aksiyon butonlari gizli — ziyaretci "basla" der.
+        if self.voice_only:
+            return []
         return [{"key": "basla", "label": "▶ Başla"},
                 {"key": "menu", "label": "🏠 Menü"},
                 {"key": "cikis", "label": "Çıkış"}]
 
-    @staticmethod
-    def _quiz_end_buttons():
+    def _quiz_end_buttons(self):
+        if self.voice_only:
+            return []
         return [{"key": "tekrar", "label": "🔁 Yeni yarışma"},
                 {"key": "menu", "label": "🏠 Menü"},
                 {"key": "cikis", "label": "Çıkış"}]
@@ -875,7 +884,8 @@ class GameEngine:
             "quiz_progress": quiz_progress,
             "dogru_mu": dogru_mu,
             "timer": timer,
-            "buttons": buttons if buttons is not None else [{"key": "cikis", "label": "Çıkış"}],
+            "buttons": (buttons if buttons is not None
+                        else ([] if self.voice_only else [{"key": "cikis", "label": "Çıkış"}])),
             "ended": ended,
             "outcome": None,
         }
@@ -889,7 +899,9 @@ class GameEngine:
         self.quiz_current = None
         self.quiz_turn = "hazir"
         prov = self._providers[self.quiz_provider]
-        yanit = prov.intro(self.QUIZ_QUESTION_COUNT) + " Hazırsan başlayalım — 'başla' de ya da butona dokun!"
+        kapanis = ("Hazırsan başlayalım — 'başla' de!" if self.voice_only
+                   else "Hazırsan başlayalım — 'başla' de ya da butona dokun!")
+        yanit = prov.intro(self.QUIZ_QUESTION_COUNT) + " " + kapanis
         return self._quiz_payload(
             "quiz_ready", turn="hazir", jest_id=random.choice(_JEST["kel_intro"]),
             yanit=yanit, yogunluk=0.8, timer=None, buttons=self._quiz_ready_buttons())
@@ -901,9 +913,11 @@ class GameEngine:
             return self.start()
         if n in _KEL_READY or any(w in _KEL_READY for w in n.split()):
             return self._begin_quiz()
+        bekle_txt = ("Hazır olunca 'başla' de :)" if self.voice_only
+                     else "Hazır olunca 'başla' de ya da butona dokun :)")
         return self._quiz_payload(
             "quiz_ready", turn="hazir", jest_id="bekle",
-            yanit="Hazır olunca 'başla' de ya da butona dokun :)", yogunluk=0.6,
+            yanit=bekle_txt, yogunluk=0.6,
             timer=None, buttons=self._quiz_ready_buttons())
 
     def _begin_quiz(self) -> dict:

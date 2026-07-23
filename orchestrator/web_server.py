@@ -74,14 +74,15 @@ SESSION_GREETING_YOGUNLUK = 0.8
 # "merhaba" selamlamasi dogrudan oyun menusunu acar.
 TEST_OYUNLAR = ("eszit", "atasozu")
 TEST_GREETING_LEAD = "Merhaba, hoş geldin!"
-TEST_SOHBET_KAPALI_TEXT = "Bugün oyun günü! Hangisini oynayalım — dokun ya da söyle."
+# Sesli-yalniz sergi akisi: dokunma fiili yok (ekranda buton dokunmatik degil).
+TEST_SOHBET_KAPALI_TEXT = "Bugün oyun günü! Hangisini oynayalım — söyle."
 
 
 def _test_greeting_yanit(menu_payload: dict) -> str:
     """Test modunda 'merhaba' yaniti: selamlama + oyun secimi (menu butonlarindan).
     Tek kaynak: /api/session/new, on-isitma ve gen_batch ayni metni uretir."""
     labels = " · ".join(b["label"] for b in menu_payload.get("buttons", []))
-    return f"{TEST_GREETING_LEAD} Hangisini oynayalım? Dokun ya da söyle: {labels}"
+    return f"{TEST_GREETING_LEAD} Hangisini oynayalım? Söyle: {labels}"
 
 
 def _test_mode_texts() -> list:
@@ -89,6 +90,7 @@ def _test_mode_texts() -> list:
     from game_engine import GameEngine
     g = GameEngine(bridge=None)
     g.izinli_oyunlar = TEST_OYUNLAR
+    g.voice_only = True   # menu/ready metinleri canli test modu ile birebir olsun (cache isabeti)
     menu = g._menu_payload()
     return [_test_greeting_yanit(menu), menu["yanit"],
             g._menu_payload(reprompt=True)["yanit"], TEST_SOHBET_KAPALI_TEXT]
@@ -264,6 +266,20 @@ def _warm_texts() -> list:
             items.append((metin, SESSION_GREETING_JEST, SESSION_GREETING_YOGUNLUK))
     except Exception as e:  # noqa: BLE001
         log.warning("On-isitma: test modu replikleri alinamadi: %s", e)
+    # 2c) Test modu quiz hazirlik replikleri — voice_only kapanislari ("butona
+    # dokun" yok) ElevenLabs batch'inde bulunmaz; ilk ziyaretcide miss olmasin.
+    try:
+        from game_engine import GameEngine, _JEST as _GJ
+        g = GameEngine(bridge=None)
+        g.voice_only = True
+        for oyun in TEST_OYUNLAR:
+            g.quiz_provider = oyun
+            hazir_yanit = g._start_quiz()["yanit"]
+            for jest in _GJ.get("kel_intro", []):                 # random.choice ikisini de secebilir
+                items.append((hazir_yanit, jest, 0.8))
+        items.append((g._handle_quiz_ready("hmm")["yanit"], "bekle", 0.6))
+    except Exception as e:  # noqa: BLE001
+        log.warning("On-isitma: test quiz replikleri alinamadi: %s", e)
     # 3) Oyun kural/hazirlik replikleri (game_engine sabitleri — en sik kullanilanlar).
     try:
         from game_engine import _JEST as _GJ, _TXT as _GT
@@ -398,6 +414,7 @@ def create_app(config: dict) -> Flask:
     test_mode = {"on": bool(config.get("test_mode", False))}
     if test_mode["on"]:
         game.izinli_oyunlar = TEST_OYUNLAR
+        game.voice_only = True
     # Flask threaded=True; tek GameEngine instance'i paylasiliyor. Sure-doldu ile
     # manuel cevap/AI-turu ayni anda gelirse durum makinesi bozulmasin diye seri kilit.
     game_lock = threading.Lock()
@@ -633,6 +650,7 @@ def create_app(config: dict) -> Flask:
         test_mode["on"] = on
         with game_lock:
             game.izinli_oyunlar = TEST_OYUNLAR if on else None
+            game.voice_only = on
             game.exit()
         config["test_mode"] = on
         # Kalicilik: diskteki config tazelenip YALNIZ bu anahtar yazilir
@@ -838,23 +856,67 @@ def create_app(config: dict) -> Flask:
     return app
 
 
+def _find_kiosk_browser():
+    """Chrome/Edge exe yolu (sergi bayraklari icin). Bulunamazsa None."""
+    import shutil
+    for name in ("chrome", "msedge"):
+        p = shutil.which(name)
+        if p:
+            return p
+    for c in (
+        os.path.expandvars(r"%ProgramFiles%\Google\Chrome\Application\chrome.exe"),
+        os.path.expandvars(r"%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe"),
+        os.path.expandvars(r"%LocalAppData%\Google\Chrome\Application\chrome.exe"),
+        os.path.expandvars(r"%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe"),
+        os.path.expandvars(r"%ProgramFiles%\Microsoft\Edge\Application\msedge.exe"),
+    ):
+        if os.path.exists(c):
+            return c
+    return None
+
+
 def open_browsers(host: str, port: int, delay_sec: float = 1.2,
-                  open_control: bool = True) -> None:
+                  open_control: bool = True, kiosk: bool = True) -> None:
     """Sunucu kalktiktan sonra sekmeleri ac.
 
     open_control=False (sergi profili: web_open_control=false): YALNIZ sergi
     ekrani acilir — ziyaretci kontrol paneline erisemez; ekran panelsiz surucu
     (app.js drv*) ile kendi basina calisir.
+
+    kiosk=True (web_kiosk_browser): Chrome/Edge ayri profil + sergi bayraklariyla
+    acilir — mikrofon izni OTOMATIK verilir (soru cikmaz) ve ses/TTS ilk dokunusu
+    beklemez. Bayraklar ancak YENI tarayici surecinde islediginden ayri
+    --user-data-dir sart (acik Chrome'a sekme eklense bayraklar yok sayilirdi).
     """
     def _open():
         import time
         time.sleep(delay_sec)
         base = f"http://{host}:{port}"
+        urls = [f"{base}/"] + ([f"{base}/control"] if open_control else [])
+        if kiosk:
+            exe = _find_kiosk_browser()
+            if exe:
+                import subprocess
+                profil = Path(__file__).resolve().parent.parent / ".tarayici_profili"
+                try:
+                    subprocess.Popen([
+                        exe,
+                        f"--user-data-dir={profil}",
+                        "--no-first-run",
+                        "--no-default-browser-check",
+                        "--autoplay-policy=no-user-gesture-required",
+                        "--use-fake-ui-for-media-stream",
+                    ] + urls)
+                    return
+                except Exception as e:  # noqa: BLE001
+                    log.warning("Sergi tarayicisi acilamadi (%s) — varsayilana dusuluyor", e)
+            else:
+                log.warning("Chrome/Edge yok — varsayilan tarayici (mikrofon izni sorulabilir)")
         try:
-            webbrowser.open_new(f"{base}/")
+            webbrowser.open_new(urls[0])
             if open_control:
                 # ikinci sekme ayni pencereye gelsin
-                webbrowser.open_new_tab(f"{base}/control")
+                webbrowser.open_new_tab(urls[1])
         except Exception as e:
             log.warning("Tarayici acilamadi: %s — manuel ac: %s", e, base)
     threading.Thread(target=_open, daemon=True).start()
@@ -866,13 +928,14 @@ def main() -> None:
     host = "127.0.0.1"
     port = int(config.get("web_port", 5057))
     open_control = bool(config.get("web_open_control", True))
+    kiosk = bool(config.get("web_kiosk_browser", True))
     log.info("AI Body web sunucusu: http://%s:%d", host, port)
     log.info("  Sergi:          http://%s:%d/", host, port)
     if open_control:
         log.info("  Kontrol paneli: http://%s:%d/control", host, port)
     else:
         log.info("  Kontrol paneli: ACILMAYACAK (web_open_control=false — sergi modu)")
-    open_browsers(host, port, open_control=open_control)
+    open_browsers(host, port, open_control=open_control, kiosk=kiosk)
     try:
         # use_reloader=False -> warmup ve iki sekme acmayi tek seferde calistirir
         app.run(host=host, port=port, debug=False, use_reloader=False, threaded=True)

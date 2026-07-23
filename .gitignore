@@ -43,6 +43,9 @@ assets/emojis/**/preview_zoom.gif
 .env
 orchestrator/.env
 
+# Sergi kiosk tarayici profili (web_server open_browsers --user-data-dir)
+.tarayici_profili/
+
 # Seslendirme (TTS)
 # NOT: .gitignore satir-ici yorumu desteklemez; aciklamalar kendi satirinda.
 # uretilen ses onbellegi (runtime)
