@@ -953,7 +953,11 @@ class GameEngine:
             timer={"seconds": self.USER_TURN_SECONDS, "who": "user"})
 
     def _quiz_check(self, q, text: str) -> bool:
-        """Cevap kontrolu — token (kume kesisimi) veya substring (atasozu)."""
+        """Cevap kontrolu — token (kume kesisimi) veya substring (atasozu).
+        Token modunda kucuk STT/soyleyis bozulmasi tolere edilir ('berayz'~'beyaz'):
+        5-7 harfte 1, 8+ harfte 2 duzenleme mesafesi. Kisa kelimeler (<=4) tam
+        eslesme ister — 'uzun'~'uzak' gibi gercek kelime karisimlarini kabul etmemek
+        icin. Substring modu (atasozu) degismedi; orada _quiz_yakin_mi devrede."""
         un = normalize(text)
         if not un:
             return False
@@ -961,7 +965,13 @@ class GameEngine:
         if q.get("match") == "substring":
             return any(a and (a in un or un in a) for a in acc)
         cand = {un} | set(un.split())
-        return bool(acc & cand)
+        if acc & cand:
+            return True
+        for a in acc:
+            tol = 2 if len(a) >= 8 else (1 if len(a) >= 5 else 0)
+            if tol and any(self._duzenleme_mesafesi(a, c) <= tol for c in cand):
+                return True
+        return False
 
     # Quiz onay replikleri — SES ON-URETIMI icin sabit/dusuk-varyant. Rastgele
     # tezahurat cevaba YAPISTIRILMAZ: onek (tezahurat/uyari) ayri cumle, "Cevap: X"

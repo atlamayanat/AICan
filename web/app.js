@@ -760,6 +760,9 @@
     onsetMult: 2.2,         // konuşma eşiği = gürültü_tabanı * mult
     absMinRms: 0.012,       // mutlak alt eşik (sessiz odada bile bu kadar gerek)
     cooldownMs: 400,        // AI sustuktan sonra tekrar dinlemeye geçme gecikmesi
+    echoCancellation: true, // hoparlör yankısını bastır (TTS aynı ekrandan çalıyor)
+    noiseSuppression: true, // Chrome DSP — uzak konuşmacıda Whisper'ı bozabilir, A/B için config'ten
+    autoGain: true,         // AGC — sessizlikte kazancı yükseltip VAD eşiğini şaşırtabilir
   };
   let viActive = false;          // dinleme fiilen açık mı (mic akışı var)
   let viStream = null;
@@ -807,9 +810,11 @@
 
   function viStartRecorder() {
     if (!viStream) return;
+    // Sabit 128 kbps: tarayıcı varsayılanı düşük seçerse Whisper girdisi bozulmasın
+    const recOpts = { audioBitsPerSecond: 128000 };
+    if (viMime) recOpts.mimeType = viMime;
     try {
-      viRec = viMime ? new MediaRecorder(viStream, { mimeType: viMime })
-                     : new MediaRecorder(viStream);
+      viRec = new MediaRecorder(viStream, recOpts);
     } catch (e) {
       console.warn('VI: MediaRecorder açılamadı', e);
       viRec = null;
@@ -936,7 +941,12 @@
     }
     try {
       viStream = await navigator.mediaDevices.getUserMedia({
-        audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+        audio: {
+          channelCount: 1,
+          echoCancellation: VI.echoCancellation,
+          noiseSuppression: VI.noiseSuppression,
+          autoGainControl: VI.autoGain,
+        },
       });
     } catch (e) {
       console.warn('VI: mikrofon reddedildi/yok —', e.name);
@@ -1005,6 +1015,9 @@
       if (typeof v.onset_mult === 'number') VI.onsetMult = v.onset_mult;
       if (typeof v.abs_min_rms === 'number') VI.absMinRms = v.abs_min_rms;
       if (typeof v.cooldown_ms === 'number') VI.cooldownMs = v.cooldown_ms;
+      if (typeof v.echo_cancellation === 'boolean') VI.echoCancellation = v.echo_cancellation;
+      if (typeof v.noise_suppression === 'boolean') VI.noiseSuppression = v.noise_suppression;
+      if (typeof v.auto_gain === 'boolean') VI.autoGain = v.auto_gain;
     } catch (e) {
       console.warn('VI: config alınamadı, varsayılanlar kullanılıyor', e);
     }

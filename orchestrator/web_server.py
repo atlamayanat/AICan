@@ -44,13 +44,52 @@ ASSETS_DIR = ROOT_DIR / "assets"
 EMOJI_BASE_DIR = ASSETS_DIR / "emojis"
 EMOJI_FPS = 12  # gesture_engine.EMOJI_FPS ile esit kalmali
 
-# Whisper (ses-metin) ayarlari — KARAR 1: small, CPU, int8, tr.
-# CPU'da kalir cunku 4GB VRAM zaten aktif LLM (config.ollama_model,
-# orn. qwen3:4b-instruct-2507) ile dolu.
+# Whisper (ses-metin) varsayilanlari. config.json anahtarlari ile ezilir:
+#   whisper_model_size / whisper_device / whisper_compute_type / whisper_initial_prompt
+# Laptop profili CPU'da kalir cunku 4GB VRAM zaten aktif LLM ile dolu;
+# sergi PC'sinde (16GB) config.sergi.json cuda/float16 secer.
 WHISPER_MODEL_SIZE = "small"
 WHISPER_DEVICE = "cpu"
 WHISPER_COMPUTE_TYPE = "int8"
 WHISPER_LANGUAGE = "tr"
+
+# Cozumlemeyi sergi sozlugune yonlendiren baglam cumlesi (bias). Whisper bunu
+# "onceki metin" sanir; alan kelimelerinin dogru yazilmasini saglar.
+WHISPER_INITIAL_PROMPT = (
+    "Bilim merkezinde çocuklarla Türkçe sohbet. Merhaba aican, oyun oynayalım, "
+    "başla, evet, hayır, eş anlam, zıt anlam, atasözü, doğru, yanlış."
+)
+
+# Whisper'in gurultuye/sessizlige uydurdugu klasik Turkce halusinasyonlar
+# (YouTube altyazi kaliplari). Normalize edilmis segment bunlardan birini
+# ICERIYORSA segment atilir. Kisa gercek cumleleri yakalamayacak kadar ozgul tut.
+WHISPER_HALLUCINATION_PHRASES = (
+    "altyazi m k",
+    "izlediginiz icin tesekkur",
+    "video icin tesekkur",
+    "abone olmayi unutmayin",
+    "kanalima abone",
+    "altyazilar amara",
+    "thank you for watching",
+    "subtitles by",
+)
+
+_TR_FOLD = str.maketrans("çğıöşüâîû", "cgiosuaiu")
+
+
+def _stt_normalize(text: str) -> str:
+    """Kucult + Turkce karakterleri sadelestir + noktalamayi at (kara liste kiyasi).
+    'İ'.lower() 'i'+birlesen nokta (U+0307) uretir ve kelimeyi boler — once sadelestir.
+    """
+    t = text.replace("İ", "i").replace("I", "i").lower().translate(_TR_FOLD)
+    t = t.replace("̇", "")
+    t = re.sub(r"[^a-z0-9 ]+", " ", t)
+    return re.sub(r"\s+", " ", t).strip()
+
+
+def _stt_is_hallucination(text: str) -> bool:
+    norm = _stt_normalize(text)
+    return any(p in norm for p in WHISPER_HALLUCINATION_PHRASES)
 
 # TTS varsayilanlari — QW-5: tek kaynak. Birincil motor edge oldugundan varsayilan
 # ses de edge sesi olmali (eski "tr_TR-dfki-medium" fallback'i Piper ses adiydi).
@@ -123,29 +162,44 @@ class WhisperState:
         self.model = None        # faster_whisper.WhisperModel | None
         self.status = "yok"      # "yok" | "yukleniyor" | "hazir" | "hata"
         self.error = ""
+        self.device = ""         # fiilen yuklenen cihaz (cuda fallback izlenebilsin)
+        self.compute_type = ""
         self._lock = threading.Lock()  # transcribe re-entrancy guard
 
     def is_ready(self) -> bool:
         return self.model is not None and self.status == "hazir"
 
 
-def _load_whisper_async(state: WhisperState, model_size: str) -> None:
-    """Modeli arka planda yukler — HTTP yanit vermeyi gec birakmaz."""
+def _load_whisper_async(state: WhisperState, model_size: str,
+                        device: str, compute_type: str) -> None:
+    """Modeli arka planda yukler — HTTP yanit vermeyi gec birakmaz.
+    CUDA istenip yuklenemezse (surucu/cuDNN eksik) CPU int8'e geri duser;
+    sergi makinesi STT'siz kalmasin.
+    """
     state.status = "yukleniyor"
     try:
         from faster_whisper import WhisperModel
-        log.info("Whisper yukleniyor: %s (%s, %s)", model_size, WHISPER_DEVICE, WHISPER_COMPUTE_TYPE)
-        state.model = WhisperModel(
-            model_size,
-            device=WHISPER_DEVICE,
-            compute_type=WHISPER_COMPUTE_TYPE,
-        )
-        state.status = "hazir"
-        log.info("Whisper hazir.")
-    except Exception as e:  # noqa: BLE001 — model yuklenmedi ama sergi calismaya devam etsin
+    except Exception as e:  # noqa: BLE001
         state.status = "hata"
         state.error = str(e)
-        log.warning("Whisper yuklenemedi: %s", e)
+        log.warning("faster_whisper import edilemedi: %s", e)
+        return
+    attempts = [(device, compute_type)]
+    if device != "cpu":
+        attempts.append(("cpu", "int8"))
+    for dev, ct in attempts:
+        try:
+            log.info("Whisper yukleniyor: %s (%s, %s)", model_size, dev, ct)
+            state.model = WhisperModel(model_size, device=dev, compute_type=ct)
+            state.device = dev
+            state.compute_type = ct
+            state.status = "hazir"
+            log.info("Whisper hazir (%s, %s).", dev, ct)
+            return
+        except Exception as e:  # noqa: BLE001 — model yuklenmedi ama sergi calismaya devam etsin
+            state.status = "hata"
+            state.error = str(e)
+            log.warning("Whisper yuklenemedi (%s, %s): %s", dev, ct, e)
 
 
 class TTSState:
@@ -436,10 +490,12 @@ def create_app(config: dict) -> Flask:
     # Whisper modeli arka planda yuklensin — HTTP istekleri bunu beklemez.
     whisper_state = WhisperState()
     whisper_size = config.get("whisper_model_size", WHISPER_MODEL_SIZE)
+    whisper_device = config.get("whisper_device", WHISPER_DEVICE)
+    whisper_compute = config.get("whisper_compute_type", WHISPER_COMPUTE_TYPE)
     if config.get("whisper_enabled", True):
         threading.Thread(
             target=_load_whisper_async,
-            args=(whisper_state, whisper_size),
+            args=(whisper_state, whisper_size, whisper_device, whisper_compute),
             daemon=True,
         ).start()
 
@@ -516,6 +572,12 @@ def create_app(config: dict) -> Flask:
                 "onset_mult": float(config.get("voice_input_onset_mult", 2.2)),
                 "abs_min_rms": float(config.get("voice_input_abs_min_rms", 0.012)),
                 "cooldown_ms": int(config.get("voice_input_cooldown_ms", 400)),
+                # Tarayici mikrofon DSP bayraklari. Chrome'un noiseSuppression/AGC'si
+                # telefon gorusmesi icin tasarlandi; uzak konusmaci + Whisper'da sesi
+                # bozabiliyor. A/B testi icin config'ten kapatilabilir.
+                "echo_cancellation": bool(config.get("voice_input_echo_cancellation", True)),
+                "noise_suppression": bool(config.get("voice_input_noise_suppression", True)),
+                "auto_gain": bool(config.get("voice_input_auto_gain", True)),
             },
         })
 
@@ -734,6 +796,8 @@ def create_app(config: dict) -> Flask:
             "ready": whisper_state.is_ready(),
             "error": whisper_state.error,
             "model": whisper_size,
+            "device": whisper_state.device or whisper_device,
+            "compute_type": whisper_state.compute_type or whisper_compute,
             "language": WHISPER_LANGUAGE,
         })
 
@@ -759,6 +823,7 @@ def create_app(config: dict) -> Flask:
             return jsonify({"error": "audio_empty"}), 400
 
         # Transcribe — re-entrancy lock (tek model, tek thread guvenli kullanim)
+        dropped = []  # halusinasyon diye atilan segmentler (log/teshis)
         try:
             with whisper_state._lock:
                 segments, info = whisper_state.model.transcribe(
@@ -770,11 +835,37 @@ def create_app(config: dict) -> Flask:
                     # CPU/small'da 5 ~1 sn ek gecikme getirir, sergide dogruluk onceliklidir.
                     beam_size=int(config.get("whisper_beam_size", 5)),
                     condition_on_previous_text=False,
+                    initial_prompt=(config.get("whisper_initial_prompt",
+                                               WHISPER_INITIAL_PROMPT) or None),
                 )
-                text = " ".join(seg.text.strip() for seg in segments).strip()
+                parts = []
+                for seg in segments:
+                    s = seg.text.strip()
+                    if s and _stt_is_hallucination(s):
+                        dropped.append(s)
+                        continue
+                    if s:
+                        parts.append(s)
+                text = " ".join(parts).strip()
         except Exception as e:  # noqa: BLE001
             log.warning("Transkripsiyon hatasi: %s", e)
             return jsonify({"error": "transcribe_failed", "detail": str(e)}), 500
+        if dropped:
+            log.info("STT halusinasyon atildi: %s", " | ".join(dropped))
+
+        # Teshis kaydi (whisper_debug_save_audio): gercek ortamdan ornek toplayip
+        # model/ayar adaylarini ayni set uzerinde kiyaslamak icin.
+        if config.get("whisper_debug_save_audio", False):
+            try:
+                dbg_dir = ROOT_DIR / "logs" / "stt_debug"
+                dbg_dir.mkdir(parents=True, exist_ok=True)
+                stamp = time.strftime("%Y%m%d-%H%M%S") + f"-{int(time.time() * 1000) % 1000:03d}"
+                (dbg_dir / f"{stamp}.webm").write_bytes(audio_bytes)
+                with open(dbg_dir / "transcripts.log", "a", encoding="utf-8") as f:
+                    f.write(f"{stamp}.webm\t{getattr(info, 'duration', 0.0):.1f}s"
+                            f"\t{text}\t[atilan: {' | '.join(dropped)}]\n")
+            except Exception as e:  # noqa: BLE001 — teshis kaydi sergiyi durdurmasin
+                log.warning("STT debug kaydi yazilamadi: %s", e)
 
         meta = {
             "duration_s": getattr(info, "duration", 0.0),

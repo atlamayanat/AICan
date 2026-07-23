@@ -108,13 +108,18 @@ def test_quiz_onek_tts_uzunlugu():
 
 def test_quiz_yanlis_onekleri():
     # Yakin yanlis -> _QUIZ_YAKIN havuzundan; uzak yanlis -> _QUIZ_YANLIS havuzundan.
-    # Kontrollu veri: kabul cevaplari 5 harfli tek kelime (yakinlik esigi net).
+    # Kontrollu veri: kabul cevaplari 6 harfli tek kelime — boylece 1 harf bozulma
+    # STT toleransiyla DOGRU kabul edilir, 2 harf bozulma yakin-yanlis kalir.
     g = GameEngine(bridge=None, word_llm=None,
-                   ea_data={"siyah": {"zit": ["beyaz"]}, "hızlı": {"zit": ["yavaş"]}},
+                   ea_data={"güzel": {"zit": ["çirkin"]}, "cesur": {"zit": ["korkak"]},
+                            "sessiz": {"zit": ["gürültü"]}},
                    atasozu_data=list(TEST_ATA), dogru_yanlis_data=list(TEST_DY))
     g.start(); g.handle("eszit"); g.handle("başla")
-    dogru_cevap = next(iter(g.quiz_current["accept_norm"]))
-    p = g.handle(dogru_cevap[:-1] + "x")   # son harfi boz -> yakin yanlis
+    cevap = next(iter(g.quiz_current["accept_norm"]))
+    p = g.handle(cevap[:-1] + "x")         # 1 harf boz -> STT toleransi: dogru sayilir
+    check("stt tolerans dogru", any(p["yanit"].startswith(o) for o in GameEngine._QUIZ_DOGRU_CHEER))
+    cevap = next(iter(g.quiz_current["accept_norm"]))
+    p = g.handle(cevap[:-2] + "xy")        # 2 harf boz -> kabul edilmez ama yakin
     check("yakin onek", any(p["yanit"].startswith(o) for o in GameEngine._QUIZ_YAKIN))
     check("yakin onek cevap icerir", "Cevap:" in p["yanit"])
     p = g.handle("qqqqq")                  # alakasiz -> notr yanlis
