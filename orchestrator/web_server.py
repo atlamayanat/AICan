@@ -73,16 +73,16 @@ SESSION_GREETING_YOGUNLUK = 0.8
 # Acikken: menude yalnizca TEST_OYUNLAR, sohbet (/api/send LLM yolu) kapali,
 # "merhaba" selamlamasi dogrudan oyun menusunu acar.
 TEST_OYUNLAR = ("eszit", "atasozu")
-TEST_GREETING_LEAD = "Merhaba, hoş geldin!"
 # Sesli-yalniz sergi akisi: dokunma fiili yok (ekranda buton dokunmatik degil).
+# Selam sabit soru formu — TEST_OYUNLAR sabit oldugu icin menuden turetme gereksiz.
+TEST_GREETING_TEXT = "Merhaba, hoş geldin! Atasözü mü oynamak istersin, Eş/Zıt Anlam mı?"
 TEST_SOHBET_KAPALI_TEXT = "Bugün oyun günü! Hangisini oynayalım — söyle."
 
 
-def _test_greeting_yanit(menu_payload: dict) -> str:
-    """Test modunda 'merhaba' yaniti: selamlama + oyun secimi (menu butonlarindan).
-    Tek kaynak: /api/session/new, on-isitma ve gen_batch ayni metni uretir."""
-    labels = " · ".join(b["label"] for b in menu_payload.get("buttons", []))
-    return f"{TEST_GREETING_LEAD} Hangisini oynayalım? Söyle: {labels}"
+def _test_greeting_yanit() -> str:
+    """Test modunda selam yaniti. Tek kaynak: /api/session/new ve on-isitma
+    ayni metni uretir (cache isabeti)."""
+    return TEST_GREETING_TEXT
 
 
 def _test_mode_texts() -> list:
@@ -92,7 +92,7 @@ def _test_mode_texts() -> list:
     g.izinli_oyunlar = TEST_OYUNLAR
     g.voice_only = True   # menu/ready metinleri canli test modu ile birebir olsun (cache isabeti)
     menu = g._menu_payload()
-    return [_test_greeting_yanit(menu), menu["yanit"],
+    return [_test_greeting_yanit(), menu["yanit"],
             g._menu_payload(reprompt=True)["yanit"], TEST_SOHBET_KAPALI_TEXT]
 
 # game_engine icindeki inline kural/hazirlik metinlerinin birebir kopyalari
@@ -618,7 +618,7 @@ def create_app(config: dict) -> Flask:
             with game_lock:
                 game.exit()
                 menu = game.start()
-            menu["yanit"] = _test_greeting_yanit(menu)
+            menu["yanit"] = _test_greeting_yanit()
             menu["jest_id"] = SESSION_GREETING_JEST
             menu["yogunluk"] = SESSION_GREETING_YOGUNLUK
             logger.log_event("Yeni ziyaretci (test modu): selamlama + oyun menusu")

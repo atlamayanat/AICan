@@ -769,6 +769,7 @@
   let viRecStartAt = 0;
   let viLastLoudAt = 0;
   let viHadSpeech = false;
+  let viSpeechStartAt = 0;       // viHadSpeech'in ilk true olduğu an (anlık selam için)
   let viNoiseFloor = 0.01;       // ortam gürültüsü (EMA ile güncellenir)
   let viPendingAction = null;    // 'send' | 'discard' — onstop ne yapsın
   let viStopping = false;        // stop() çağrıldı, onstop bekleniyor (yarış engeli)
@@ -812,6 +813,7 @@
     }
     viChunks = [];
     viHadSpeech = false;
+    viSpeechStartAt = 0;
     viPendingAction = null;
     viStopping = false;
     viRecStartAt = performance.now();
@@ -890,9 +892,22 @@
 
     if (loud) {
       viLastLoudAt = now;
+      if (!viHadSpeech) viSpeechStartAt = now;
       viHadSpeech = true;
     } else if (!viHadSpeech) {
       viNoiseFloor = viNoiseFloor * 0.95 + rms * 0.05;             // hâlâ sessizken taban
+    }
+
+    // ANLIK SELAM (test modu, panelsiz): boştayken ses duyulur duyulmaz —
+    // çeviriyi BEKLEMEDEN — selamla + oyun sorusunu sor. Segment atılır;
+    // içerik zaten kullanılmazdı (boşta her söz selama gider). Selam TTS'i
+    // çalarken viGated() kaydı durdurur, selam sonrası phase='menu'
+    // olduğundan koşul tekrar sağlanmaz.
+    if (viHadSpeech && (now - viSpeechStartAt) >= VI.minSpeechMs
+        && testModeOn && !panelAlive() && !drvGamePhase && !drvBusy) {
+      viStopRecorder('discard');
+      drvInstantGreet();
+      return;
     }
 
     const sinceStart = now - viRecStartAt;
@@ -1202,11 +1217,27 @@
     }
   }
 
+  // Test modu (panelsiz): ses duyulur duyulmaz, çeviri beklemeden selamla.
+  // viMonitorTick tetikler; drvBusy eşzamanlı ikinci tetiği/çeviriyi keser.
+  async function drvInstantGreet() {
+    if (drvBusy) return;
+    drvBusy = true;
+    drvNoteActivity();
+    noteInteraction();
+    try {
+      await drvNewSession('');
+    } catch (e) {
+      console.warn('DRV: anlık selam başarısız', e);
+    } finally {
+      drvBusy = false;
+    }
+  }
+
   async function drvNewSession(text) {
     drvGamePhase = null;
     drvStopTimer(false);
     drvSend({ type: 'session_reset' });
-    drvSend({ type: 'user_text', text: text });
+    if (text) drvSend({ type: 'user_text', text: text });
     drvSend({ type: 'thinking', on: true });
     try {
       const data = await drvFetchJson('/api/session/new');
