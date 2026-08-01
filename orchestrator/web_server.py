@@ -60,19 +60,36 @@ WHISPER_INITIAL_PROMPT = (
     "başla, evet, hayır, eş anlam, zıt anlam, atasözü, doğru, yanlış."
 )
 
+# Oyun modunda (/api/transcribe form alani context=game) kisa komut sozlugu:
+# cevaplar tek kelime oldugu icin bias'i komutlara daraltmak ilk denemede
+# dogru tanima oranini artirir (yanlis hamle -> tekrar turu = en buyuk gecikme).
+# Sohbet promptundan ayri tutulur ki gunluk konusma komutlara cekilmesin.
+# config.json "whisper_initial_prompt_game" ile ezilebilir.
+WHISPER_GAME_PROMPT = (
+    "Bilim merkezinde çocuklarla sesli oyun. Başla, hazırım, tamam, menü, çıkış, "
+    "tekrar, atasözü, eş anlam, zıt anlam, doğru, yanlış, kelime, bir, iki, üç, dört."
+)
+
 # Whisper'in gurultuye/sessizlige uydurdugu klasik Turkce halusinasyonlar
 # (YouTube altyazi kaliplari). Normalize edilmis segment bunlardan birini
 # ICERIYORSA segment atilir. Kisa gercek cumleleri yakalamayacak kadar ozgul tut.
 WHISPER_HALLUCINATION_PHRASES = (
-    "altyazi m k",
     "izlediginiz icin tesekkur",
     "video icin tesekkur",
     "abone olmayi unutmayin",
+    "abone olun",
     "kanalima abone",
-    "altyazilar amara",
+    "begenmeyi unutmayin",
+    "iyi seyirler",
     "thank you for watching",
     "subtitles by",
 )
+
+# Tek basina gecmesi bile halusinasyon sayilan kelimeler: sergide kimse
+# "altyazı" demez; Whisper sessizlige en sik bunu uydurur. Eski "altyazi m k"
+# KALIP eslesmesi K'siz varyantlari ("Altyazı M", "Altyazı: ...") KACIRIYORDU —
+# sahada her soz "Altyazı M" diye donuyordu. Kelime bazli kontrol hepsini yakalar.
+WHISPER_HALLUCINATION_WORDS = frozenset({"altyazi", "altyazilar", "altyazili", "amara"})
 
 _TR_FOLD = str.maketrans("çğıöşüâîû", "cgiosuaiu")
 
@@ -89,7 +106,97 @@ def _stt_normalize(text: str) -> str:
 
 def _stt_is_hallucination(text: str) -> bool:
     norm = _stt_normalize(text)
-    return any(p in norm for p in WHISPER_HALLUCINATION_PHRASES)
+    if any(p in norm for p in WHISPER_HALLUCINATION_PHRASES):
+        return True
+    return bool(WHISPER_HALLUCINATION_WORDS & set(norm.split()))
+
+
+# ——— Gurultu bastirma (denoise) — STT ONCESI opsiyonel on-isleme ———————————
+# Gurultulu sergi ortami icin: Whisper'a girmeden ONCE ses 16 kHz'e cozulup
+# spektral gating ile temizlenir (noisereduce — saf CPU, CEVRIMDISI, KREDI
+# HARCAMAZ). ElevenLabs Voice Isolator'un aksine yerel: her cumlede bulut
+# gidis-donusu / kredi yok. Config'ten acilir (whisper_denoise_enabled);
+# kutuphane yoksa ya da hata olursa SESSIZCE ham sesle devam edilir (sergi
+# asla susmaz). NOT: asiri denoise Whisper'i BOZABILIR — prop_decrease olculu
+# tutulmali ve whisper_debug_save_audio ile A/B test edilmeli.
+_NR = {"tried": False, "mod": None}
+
+
+def _noisereduce():
+    """noisereduce modulunu bir kez lazy yukle; yoksa None (yalnizca bir kez uyar)."""
+    if not _NR["tried"]:
+        _NR["tried"] = True
+        try:
+            import noisereduce as nr
+            _NR["mod"] = nr
+        except Exception as e:  # noqa: BLE001 — kutuphane yoksa denoise atlanir
+            log.warning("noisereduce yuklenemedi — denoise devre disi: %s", e)
+    return _NR["mod"]
+
+
+def _prepare_audio(audio_bytes: bytes, config: dict, trim_ms: int = 0):
+    """Ham ses bytes -> (float32 np.array @16kHz | None, denoise_ms, trim uygulanan ms).
+
+    Iki on-isleme tek decode ile: (1) TRIM — istemci konusma baslangicini bildirir
+    (trim_ms); oncesindeki sessizlik/TTS yankisi atilir. Kayit surekli acik oldugundan
+    blob'un basinda saniyelerce alakasiz ses birikebilir: Whisper'in AI'nin kendi
+    cumlesini "duymasinin" (yanlis girdi) ve bosuna uzun cozumlemesinin ana kaynagi.
+    (2) DENOISE — spektral gating (mevcut davranis).
+
+    None donerse cagiran HAM bytes'i Whisper'a verir (davranis degismez). Model
+    KILIDI DISINDA cagrilmali — bu CPU isi, kilidi bosuna tutmasin."""
+    want_denoise = bool(config.get("whisper_denoise_enabled", False))
+    trim_ms = max(0, int(trim_ms or 0))
+    if not want_denoise and trim_ms <= 0:
+        return None, 0, 0
+    try:
+        import numpy as np
+        from faster_whisper.audio import decode_audio
+        t = time.perf_counter()
+        y = decode_audio(io.BytesIO(audio_bytes), sampling_rate=16000)
+        trimmed = 0
+        if trim_ms > 0:
+            cut = int(trim_ms * 16)  # 16 ornek/ms @16kHz
+            # Guvenlik: kirpma sonrasi en az 0.35 sn kalmali (istemci payi zaten
+            # ~350 ms erken keser); kalmiyorsa kirpma atlanir, ses oldugu gibi gider.
+            if len(y) - cut >= int(0.35 * 16000):
+                y = y[cut:]
+                trimmed = trim_ms
+        if want_denoise:
+            nr = _noisereduce()
+            if nr is not None:
+                y = nr.reduce_noise(
+                    y=y, sr=16000,
+                    prop_decrease=float(config.get("whisper_denoise_prop_decrease", 0.75)),
+                    stationary=bool(config.get("whisper_denoise_stationary", False)),
+                )
+        # ctranslate2 icin bitisik float32 dizi
+        y = np.ascontiguousarray(y, dtype=np.float32)
+        return y, int((time.perf_counter() - t) * 1000), trimmed
+    except Exception as e:  # noqa: BLE001 — hata olursa ham sesle devam
+        log.warning("Ses on-isleme hatasi — ham ses kullanilacak: %s", e)
+        return None, 0, 0
+
+
+def _stt_is_tts_echo(text: str, echo_text: str) -> bool:
+    """Transkript, az once calan TTS metninin yankisi mi?
+
+    Istemci yalnizca AI konusurken/konusma bitisinde baslamis kayitlar icin
+    echo_text gonderir (bos gelirse hic bakilmaz). Cocuklar mesru olarak AI'nin
+    cumlesindeki KELIMELERI tekrar eder ("atasözü" secimi, quiz cevabi) — bu
+    yuzden tek/iki kelime asla yankı sayilmaz: en az 4 kelime VE kelimelerin
+    >=%80'i TTS metninde geciyorsa yankidir."""
+    if not text or not echo_text:
+        return False
+    words = _stt_normalize(text).split()
+    if len(words) < 4:
+        return False
+    echo_words = set(_stt_normalize(echo_text).split())
+    if not echo_words:
+        return False
+    hit = sum(1 for w in words if w in echo_words)
+    return (hit / len(words)) >= 0.8
+
 
 # TTS varsayilanlari — QW-5: tek kaynak. Birincil motor edge oldugundan varsayilan
 # ses de edge sesi olmali (eski "tr_TR-dfki-medium" fallback'i Piper ses adiydi).
@@ -170,11 +277,75 @@ class WhisperState:
         return self.model is not None and self.status == "hazir"
 
 
+def _add_cuda_dll_dirs() -> None:
+    """pip ile kurulan nvidia-* wheel'larinin (cublas/cudnn) DLL klasorlerini
+    Windows DLL arama yoluna ekler.
+
+    KRITIK: ctranslate2 cublas64_12.dll / cudnn dll'lerini GEC yukler — model
+    CUDA'ya sorunsuz 'yuklenir' (status=hazir) ama ILK transkripsiyonda
+    "Library cublas64_12.dll is not found" ile coker. Sistem CUDA Toolkit'i
+    kurulu degilse bile pip'teki nvidia-cublas-cu12 + nvidia-cudnn-cu12
+    yeterlidir; burada onlarin bin/ klasorlerini hem add_dll_directory hem
+    PATH'e ekleriz (ct2 PATH uzerinden LoadLibrary yapar)."""
+    if os.name != "nt":
+        return
+    import site
+    import sysconfig
+    roots = set()
+    try:
+        roots.update(site.getsitepackages())
+    except Exception:  # noqa: BLE001 — venv/embedded python'da olmayabilir
+        pass
+    roots.add(sysconfig.get_paths().get("purelib", ""))
+    added = []
+    for root in roots:
+        if not root:
+            continue
+        nv = Path(root) / "nvidia"
+        if not nv.is_dir():
+            continue
+        for bin_dir in sorted(nv.glob("*/bin")):
+            try:
+                os.add_dll_directory(str(bin_dir))
+            except Exception:  # noqa: BLE001
+                pass
+            added.append(str(bin_dir))
+    if added:
+        os.environ["PATH"] = os.pathsep.join(added) + os.pathsep + os.environ.get("PATH", "")
+        log.info("CUDA DLL yollari eklendi: %s", "; ".join(added))
+
+
+def _whisper_probe(model) -> None:
+    """Kucuk GERCEK transkripsiyon calistirir (1 sn'lik ton).
+
+    Model yuklemesi basarili gorunse de CUDA calisma kutuphaneleri eksik/bozuksa
+    hata ancak ilk encode'da patlar; sergi o ana kadar 'hazir' sanip sahada
+    sagir kalirdi. Probe hatasi cagirana yukselir -> CPU denemesine gecilir.
+    vad_filter KAPALI: sesin konusma sayilmamasi encode'u atlatmasin."""
+    import math
+    import struct
+    import wave
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(16000)
+        frames = bytearray()
+        for i in range(16000):  # 1 saniye, 440 Hz dusuk genlikli ton
+            frames += struct.pack("<h", int(3000 * math.sin(2 * math.pi * 440 * i / 16000)))
+        w.writeframes(bytes(frames))
+    buf.seek(0)
+    segments, _info = model.transcribe(buf, language=WHISPER_LANGUAGE,
+                                       beam_size=1, vad_filter=False)
+    for _seg in segments:  # generator'i tuket — encode fiilen calissin
+        pass
+
+
 def _load_whisper_async(state: WhisperState, model_size: str,
                         device: str, compute_type: str) -> None:
     """Modeli arka planda yukler — HTTP yanit vermeyi gec birakmaz.
-    CUDA istenip yuklenemezse (surucu/cuDNN eksik) CPU int8'e geri duser;
-    sergi makinesi STT'siz kalmasin.
+    CUDA istenip yuklenemez ya da CALISTIRILAMAZSA (cublas/cuDNN eksik)
+    CPU int8'e geri duser; sergi makinesi STT'siz kalmasin.
     """
     state.status = "yukleniyor"
     try:
@@ -184,22 +355,28 @@ def _load_whisper_async(state: WhisperState, model_size: str,
         state.error = str(e)
         log.warning("faster_whisper import edilemedi: %s", e)
         return
+    if device != "cpu":
+        _add_cuda_dll_dirs()
     attempts = [(device, compute_type)]
     if device != "cpu":
         attempts.append(("cpu", "int8"))
     for dev, ct in attempts:
         try:
             log.info("Whisper yukleniyor: %s (%s, %s)", model_size, dev, ct)
-            state.model = WhisperModel(model_size, device=dev, compute_type=ct)
+            model = WhisperModel(model_size, device=dev, compute_type=ct)
+            # Yukleme yetmez — kucuk gercek transkripsiyonla dogrula (cublas/cudnn
+            # eksikligi ancak burada gorunur). Basarisizsa siradaki denemeye gec.
+            _whisper_probe(model)
+            state.model = model
             state.device = dev
             state.compute_type = ct
             state.status = "hazir"
             log.info("Whisper hazir (%s, %s).", dev, ct)
             return
-        except Exception as e:  # noqa: BLE001 — model yuklenmedi ama sergi calismaya devam etsin
+        except Exception as e:  # noqa: BLE001 — model calismadi ama sergi devam etsin
             state.status = "hata"
             state.error = str(e)
-            log.warning("Whisper yuklenemedi (%s, %s): %s", dev, ct, e)
+            log.warning("Whisper yuklenemedi/calismadi (%s, %s): %s", dev, ct, e)
 
 
 class TTSState:
@@ -293,7 +470,14 @@ def _tts_synth_cached(state: "TTSState", cache, config: dict, text: str,
         with state._lock:  # tek model -> seri sentez
             audio = state.engine.synthesize(text, jest_id, yogunluk)
         if audio:
-            cache.put(key, audio)
+            # ONBELLEK ZEHIRLENME KORUMASI: yedege dusen sentez (ornegin
+            # ElevenLabs anahtari yokken edge) birincil motorun anahtari altina
+            # YAZILMAZ — yoksa ucretsiz ses, on-uretilmis ElevenLabs seslerinin
+            # yerini kalici alir ve anahtar eklendikten sonra bile calinirdi.
+            src = getattr(state.engine, "last_engine", None)
+            intended = getattr(getattr(state.engine, "primary", state.engine), "name", None)
+            if src is None or intended is None or src == intended:
+                cache.put(key, audio)
     return audio
 
 
@@ -472,6 +656,9 @@ def create_app(config: dict) -> Flask:
     # Flask threaded=True; tek GameEngine instance'i paylasiliyor. Sure-doldu ile
     # manuel cevap/AI-turu ayni anda gelirse durum makinesi bozulmasin diye seri kilit.
     game_lock = threading.Lock()
+    # Aktif oyuna en son girdi gelen an: /api/session/new'in "canli oyunu koruma"
+    # karari bunu kullanir (sayfa yenilenip oyun sahipsiz kaldiysa eskimis sayilir).
+    game_last_input = {"t": 0.0}
     gestures_path = (BASE_DIR / config["gestures_path"]).resolve()
     log_path = (BASE_DIR / config.get("session_log_path", "../logs/session.log")).resolve()
     logger = SessionLogger(log_path, config["ollama_url"], bridge.model)
@@ -568,10 +755,26 @@ def create_app(config: dict) -> Flask:
                 "autostart": bool(config.get("voice_input_autostart", True)),
                 "silence_ms": int(config.get("voice_input_silence_ms", 1000)),
                 "min_speech_ms": int(config.get("voice_input_min_speech_ms", 350)),
+                # Oyun modu: cevaplar tek kelime ("tas", "bir") — cumle-bitti
+                # karari daha erken verilebilir, tur basina ~400 ms kazanc.
+                "silence_ms_game": int(config.get("voice_input_silence_ms_game", 600)),
+                "min_speech_ms_game": int(config.get("voice_input_min_speech_ms_game", 250)),
                 "max_utterance_ms": int(config.get("voice_input_max_utterance_ms", 12000)),
                 "onset_mult": float(config.get("voice_input_onset_mult", 2.2)),
                 "abs_min_rms": float(config.get("voice_input_abs_min_rms", 0.012)),
                 "cooldown_ms": int(config.get("voice_input_cooldown_ms", 400)),
+                # Barge-in: AI konusurken (TTS) mikrofon acik kalir; kullanici
+                # yeterince yuksek + surekli konusursa TTS kesilip kayit baslar.
+                # barge_in_mult: konusma esigi TTS sirasinda bu katsayiyla yukseltilir
+                # (echo-cancel artigi AI'yi kendi kendine kesmesin). min_ms: kesme icin
+                # gereken surekli yuksek-ses suresi.
+                "barge_in": bool(config.get("voice_input_barge_in", True)),
+                "barge_in_mult": float(config.get("voice_input_barge_in_mult", 2.2)),
+                "barge_in_min_ms": int(config.get("voice_input_barge_in_min_ms", 280)),
+                # hold_during_speech=true: AI konusurken KESILMEZ; sirasinda soylenen
+                # (bThr ustundeki gercek konusma) biriktirilir, AI cumlesini bitirince
+                # cevaba cevrilir. barge_in'in yerine gecer. false ise klasik barge-in.
+                "hold_during_speech": bool(config.get("voice_input_hold_during_speech", True)),
                 # Tarayici mikrofon DSP bayraklari. Chrome'un noiseSuppression/AGC'si
                 # telefon gorusmesi icin tasarlandi; uzak konusmaci + Whisper'da sesi
                 # bozabiliyor. A/B testi icin config'ten kapatilabilir.
@@ -673,7 +876,24 @@ def create_app(config: dict) -> Flask:
 
         Bu akista LLM'e gidilmez; karsilama sabit kalir ki kiosk her ziyaretciye
         temiz ve hizli bir acilis yapsin.
+
+        KORUMA: Aktif (girdi almaya devam eden) bir yarisma yalnizca "ziyaretci
+        gitti" kararlariyla (attract/idle_reset/end_to_eyes) sifirlanabilir.
+        Acik unutulmus ikinci bir sergi sekmesi/istemci gurultuyle 'greet'
+        atarsa ORTADAKI OYUN bozulmasin. Sayfa yenilenip oyun sahipsiz kaldiysa
+        (60+ sn girdisiz) eskimis sayilir ve sifirlamaya izin verilir — yoksa
+        kiosk sonsuza dek "oyun aktif" diye selam veremezdi.
         """
+        payload = request.get_json(silent=True) or {}
+        reason = str(payload.get("reason") or "eski_istemci")[:24]
+        with game_lock:
+            aktif_quiz = (game.phase == "quiz" and game.quiz_turn is not None)
+            taze = (time.time() - game_last_input["t"]) < 60
+            if (aktif_quiz and taze
+                    and reason not in ("attract", "idle_reset", "end_to_eyes")):
+                logger.log_event(
+                    f"session/new REDDEDILDI: aktif yarisma korundu (neden={reason})")
+                return jsonify({"error": "game_active", "phase": game.phase}), 409
         bridge.clear_history()
         if test_mode["on"]:
             # Test gunu: "merhaba" -> selamla + dogrudan oyun secimi (sohbet yok).
@@ -683,11 +903,12 @@ def create_app(config: dict) -> Flask:
             menu["yanit"] = _test_greeting_yanit()
             menu["jest_id"] = SESSION_GREETING_JEST
             menu["yogunluk"] = SESSION_GREETING_YOGUNLUK
-            logger.log_event("Yeni ziyaretci (test modu): selamlama + oyun menusu")
+            logger.log_event(
+                f"Yeni ziyaretci (test modu): selamlama + oyun menusu [neden={reason}]")
             return jsonify(menu)
         with game_lock:
             game.exit()
-        logger.log_event("Yeni ziyaretci: selamlama ile temiz oturum")
+        logger.log_event(f"Yeni ziyaretci: selamlama ile temiz oturum [neden={reason}]")
         return jsonify({
             "ok": True,
             "jest_id": SESSION_GREETING_JEST,
@@ -738,6 +959,7 @@ def create_app(config: dict) -> Flask:
     def api_game_start():
         with game_lock:
             result = game.start()
+        game_last_input["t"] = time.time()
         logger.log_event("Oyun baslatildi (kelime turetme)")
         return jsonify(result)
 
@@ -746,13 +968,17 @@ def create_app(config: dict) -> Flask:
         payload = request.get_json(silent=True) or {}
         text = (payload.get("text") or "").strip()
         timeout = bool(payload.get("timeout"))
+        # button=True: panel butonundan geldi — sesli girdiden farkli olarak
+        # cikis komutlari aktif quiz'de de gecerli (STT gurultusu sayilmaz).
+        button = bool(payload.get("button"))
         if not text and not timeout:
             return jsonify({"error": "metin bos"}), 400
         # Sergi koruma: oyun girdileri kisa olmali
         if len(text) > 60:
             text = text[:60]
         with game_lock:
-            result = game.handle(text, timeout=timeout)
+            result = game.handle(text, timeout=timeout, button=button)
+        game_last_input["t"] = time.time()
         if result.get("kind") == "round":
             logger.log_event(
                 f"Oyun turu: kullanici={result.get('user_move')} ai={result.get('ai_move')} "
@@ -822,36 +1048,130 @@ def create_app(config: dict) -> Flask:
         if not audio_bytes:
             return jsonify({"error": "audio_empty"}), 400
 
-        # Transcribe — re-entrancy lock (tek model, tek thread guvenli kullanim)
-        dropped = []  # halusinasyon diye atilan segmentler (log/teshis)
+        # Baglam bias'i: oyun modunda kisa komut sozlugu, yoksa genel sergi
+        # sozlugu. Serbest LLM duzeltmesi DEGIL — yalnizca initial_prompt degisir.
+        ctx = (request.form.get("context") or request.args.get("context") or "").strip()
+        if ctx == "game":
+            init_prompt = config.get("whisper_initial_prompt_game", WHISPER_GAME_PROMPT)
+            # DINAMIK BIAS: olasi cevaplar zaten dosyada yazili (menu secenekleri,
+            # o anki quiz sorusunun kabul cevaplari, "basla" onayi). Oyun motoru
+            # fazina gore listeyi verir; Whisper cozumlemeyi bu kelimelere ceker.
+            # Serbest duzeltme DEGIL: cocuk baska bir sey derse o yazilir.
+            try:
+                hints = game.stt_hints()
+            except Exception as e:  # noqa: BLE001 — ipucu alinamazsa temel prompt yeter
+                log.debug("stt_hints alinamadi: %s", e)
+                hints = []
+            if hints:
+                init_prompt = f"{init_prompt} Olası cevaplar: {', '.join(hints)}."
+        else:
+            init_prompt = config.get("whisper_initial_prompt", WHISPER_INITIAL_PROMPT)
+
+        # Istemci ipuclari: trim_ms = konusma oncesi kirpilacak sure (kayit surekli
+        # acik; bastaki sessizlik/TTS yankisi Whisper'a girmesin — hem hiz hem
+        # dogruluk). echo_text = kayit AI konusurken basladiysa az once calan TTS
+        # metni (transkript salt yankiysa atilir).
         try:
-            with whisper_state._lock:
-                segments, info = whisper_state.model.transcribe(
-                    io.BytesIO(audio_bytes),
-                    language=WHISPER_LANGUAGE,
-                    vad_filter=True,
-                    # Dogruluk icin beam arama (eski greedy=1 oto-VAD parcali sesinde
-                    # cok yanlis okuyordu). config.whisper_beam_size ile ayarlanir;
-                    # CPU/small'da 5 ~1 sn ek gecikme getirir, sergide dogruluk onceliklidir.
-                    beam_size=int(config.get("whisper_beam_size", 5)),
-                    condition_on_previous_text=False,
-                    initial_prompt=(config.get("whisper_initial_prompt",
-                                               WHISPER_INITIAL_PROMPT) or None),
-                )
-                parts = []
-                for seg in segments:
-                    s = seg.text.strip()
-                    if s and _stt_is_hallucination(s):
-                        dropped.append(s)
-                        continue
-                    if s:
-                        parts.append(s)
-                text = " ".join(parts).strip()
+            trim_ms_req = int(request.form.get("trim_ms") or request.args.get("trim_ms") or 0)
+        except ValueError:
+            trim_ms_req = 0
+        echo_text = (request.form.get("echo_text") or "").strip()
+
+        # STT ONCESI trim + opsiyonel gurultu bastirma — model KILIDINDAN ONCE
+        # (CPU isi, kilidi tutmaz). Basarisiz/kapali ise ham bytes ile devam edilir.
+        prepared, denoise_ms, trimmed_ms = _prepare_audio(audio_bytes, config, trim_ms_req)
+        stt_input = prepared if prepared is not None else io.BytesIO(audio_bytes)
+
+        # Transcribe — re-entrancy lock (tek model, tek thread guvenli kullanim).
+        # TIMEOUT'LU acquire: onceki bir istek native katmanda takilirsa (CUDA
+        # kutuphane hatasi vb.) sonraki istekler sonsuza dek beklemesin — sergi
+        # ekrani 503 alir, mikrofon dongusu kendini toparlar.
+        if not whisper_state._lock.acquire(timeout=30):
+            log.warning("Transkripsiyon kilidi 30 sn'de alinamadi — onceki istek takili.")
+            return jsonify({"error": "transcribe_busy"}), 503
+        dropped = []  # halusinasyon diye atilan segmentler (log/teshis)
+        retried = False  # bos sonuc kurtarma turu calisti mi (log/teshis)
+        t0 = time.perf_counter()  # saf STT suresi (kilit alindiktan sonra)
+
+        def _stt_gecir(inp, vad_params, siki_filtre=False):
+            """Tek transkripsiyon gecisi (kilit CAGIRANDA). -> (text, info)
+
+            siki_filtre: kurtarma turu dusuk VAD esigiyle calisir — gurultuden
+            metin uydurma riski yuksektir. Modelin KENDI guven olcutleriyle ele:
+            sessizlik olasiligi yuksek ya da olasiligi cok dusuk segmentler atilir.
+            Ilk (normal) geciste dokunulmaz — kisik gercek konusma yanmasin."""
+            segments, info = whisper_state.model.transcribe(
+                inp,
+                language=WHISPER_LANGUAGE,
+                vad_filter=True,
+                vad_parameters=vad_params,
+                # Dogruluk icin beam arama (eski greedy=1 oto-VAD parcali sesinde
+                # cok yanlis okuyordu). config.whisper_beam_size ile ayarlanir;
+                # CPU/small'da 5 ~1 sn ek gecikme getirir, sergide dogruluk onceliklidir.
+                beam_size=int(config.get("whisper_beam_size", 5)),
+                condition_on_previous_text=False,
+                initial_prompt=(init_prompt or None),
+                # Zaman damgasi kullanilmiyor — token uretimini azaltir (daha hizli).
+                without_timestamps=True,
+            )
+            parts = []
+            for seg in segments:  # generator: asil hesap bu dongude olur
+                s = seg.text.strip()
+                if not s:
+                    continue
+                if _stt_is_hallucination(s):
+                    dropped.append(s)
+                    continue
+                if siki_filtre and (getattr(seg, "no_speech_prob", 0.0) > 0.5
+                                    or getattr(seg, "avg_logprob", 0.0) < -1.2):
+                    dropped.append(s)
+                    continue
+                parts.append(s)
+            return " ".join(parts).strip(), info
+
+        try:
+            # Ic VAD siki: varsayilan min_silence 2000 ms — 1-3 sn'lik sergi
+            # cumlelerinde bastaki/sondaki sessizligi hic kirpmiyordu (bosuna
+            # cozumleme + kuyruk halusinasyonu). 300/200 ms sergi icin yeterli.
+            vad_params = {
+                "min_silence_duration_ms": int(config.get("whisper_vad_min_silence_ms", 300)),
+                "speech_pad_ms": int(config.get("whisper_vad_speech_pad_ms", 200)),
+            }
+            text, info = _stt_gecir(stt_input, vad_params)
+            # KURTARMA TURU ("defalarca duyamadim" onlemi): ilk gecis bos dondu
+            # ama istemci konusma ALGILADI (RMS esigi asilmadan gonderim olmaz).
+            # Iki olasi kayip noktasi var: (1) trim/denoise on-islemesi sesi
+            # bozdu, (2) ic VAD kisik konusmayi yuttu. HAM bytes + dusuk VAD
+            # esigiyle BIR kez daha dene — yalnizca basarisizlikta calisir,
+            # tipik yolda ek maliyet sifir. Yanki/halusinasyon filtreleri
+            # kurtarma metnine de aynen uygulanir.
+            if not text:
+                retried = True
+                text, info = _stt_gecir(io.BytesIO(audio_bytes),
+                                        dict(vad_params, threshold=0.4),
+                                        siki_filtre=True)
+            stt_ms = int((time.perf_counter() - t0) * 1000)
         except Exception as e:  # noqa: BLE001
             log.warning("Transkripsiyon hatasi: %s", e)
             return jsonify({"error": "transcribe_failed", "detail": str(e)}), 500
+        finally:
+            whisper_state._lock.release()
         if dropped:
             log.info("STT halusinasyon atildi: %s", " | ".join(dropped))
+        # TTS yankisi filtresi: kayit AI konusurken basladiysa ve transkript az
+        # once calan cumlenin kendisiyse kullanici girdisi DEGILDIR — at.
+        # (AI'nin kendi sorusunu cevap sanmasi = sahadaki "yanlis aliyor".)
+        is_echo = _stt_is_tts_echo(text, echo_text)
+        if is_echo:
+            log.info("STT TTS yankisi atildi: %s", text)
+            text = ""
+        # Performans izleme noktasi: sahada hedef ~1 sn (GPU turbo). Belirgin
+        # artis = CPU'ya dusulmus ya da VRAM taskini — /api/transcribe/status'a bak.
+        log.info("STT %d ms%s%s%s | ses %.1f sn | baglam=%s",
+                 stt_ms, (f" | denoise {denoise_ms} ms" if denoise_ms else ""),
+                 (f" | trim {trimmed_ms} ms" if trimmed_ms else ""),
+                 (" | kurtarma turu" if retried else ""),
+                 getattr(info, "duration", 0.0), ctx or "sohbet")
 
         # Teshis kaydi (whisper_debug_save_audio): gercek ortamdan ornek toplayip
         # model/ayar adaylarini ayni set uzerinde kiyaslamak icin.
@@ -871,9 +1191,14 @@ def create_app(config: dict) -> Flask:
             "duration_s": getattr(info, "duration", 0.0),
             "language": getattr(info, "language", WHISPER_LANGUAGE),
             "language_prob": getattr(info, "language_probability", 0.0),
+            "stt_ms": stt_ms,
+            "denoise_ms": denoise_ms,
+            "trim_ms": trimmed_ms,
+            "retry": retried,
         }
         if not text:
-            return jsonify({"text": "", "meta": meta, "warning": "no_speech"})
+            return jsonify({"text": "", "meta": meta,
+                            "warning": "tts_echo" if is_echo else "no_speech"})
         # Sergi koruma: cok uzun konusma -> kirp (ses giris akisini kilitlemeyelim)
         max_chars = int(config.get("max_user_input_chars", 240))
         truncated = False
@@ -933,7 +1258,13 @@ def create_app(config: dict) -> Flask:
     @app.route("/<path:filename>")
     def static_files(filename):
         # API yollari yukaridaki net route'larda kalmali; catch-all sadece web dosyalari icin.
-        return send_from_directory(str(WEB_DIR), filename)
+        resp = send_from_directory(str(WEB_DIR), filename)
+        # app.js/control.js/*.html degisince tarayici ESKI surumu onbellekten
+        # vermesin (kalici profilli kiosk tarayicisi inatci): her seferinde
+        # yeniden dogrula. Aksi halde JS degisiklikleri "gorunmez" kalir.
+        if filename.rsplit(".", 1)[-1].lower() in ("js", "css", "html"):
+            resp.headers["Cache-Control"] = "no-store, must-revalidate"
+        return resp
 
     # CORS: sadece localhost; basit acik politika (tek bilgisayar)
     @app.after_request
@@ -945,6 +1276,36 @@ def create_app(config: dict) -> Flask:
 
     app.config["_logger"] = logger
     return app
+
+
+def _kill_stale_kiosk():
+    """Onceki BASLAT'tan kalan sergi tarayicisini kapat (tek sergi sayfasi kurali).
+
+    Ayni .tarayici_profili'ne her calistirmada YENI sekme/pencere eklenir; eski
+    sergi sayfasi arka planda calismaya (mikrofonu dinlemeye) devam eder ve
+    gorunmez bir 'hayalet' istemci olur: gurultu duyunca selam/oturum sifirlama
+    cagirir, gorunur ekrandaki AKTIF OYUNU ortasinda bozar. Kiosk profili sergiye
+    ozel oldugundan yalnizca o profili kullanan tarayici surecleri kapatilir."""
+    try:
+        import psutil
+    except ImportError:
+        return
+    oldurulen = 0
+    for p in psutil.process_iter(["name", "cmdline"]):
+        try:
+            ad = (p.info["name"] or "").lower()
+            if not (ad.startswith("chrome") or ad.startswith("msedge")):
+                continue
+            cmd = " ".join(p.info["cmdline"] or ())
+            if ".tarayici_profili" in cmd:
+                p.kill()
+                oldurulen += 1
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+    if oldurulen:
+        log.info("Eski sergi tarayicisi kapatildi (%d surec) — taze sayfa acilacak", oldurulen)
+        import time as _t
+        _t.sleep(1.0)   # profil kilidi (SingletonLock) birakilsin
 
 
 def _find_kiosk_browser():
@@ -988,6 +1349,9 @@ def open_browsers(host: str, port: int, delay_sec: float = 1.2,
             exe = _find_kiosk_browser()
             if exe:
                 import subprocess
+                # Eski calistirmadan kalan sergi sayfasi 'hayalet istemci' olarak
+                # oturum sifirlayip aktif oyunu bozabiliyor — once onu kapat.
+                _kill_stale_kiosk()
                 profil = Path(__file__).resolve().parent.parent / ".tarayici_profili"
                 try:
                     subprocess.Popen([
@@ -997,6 +1361,10 @@ def open_browsers(host: str, port: int, delay_sec: float = 1.2,
                         "--no-default-browser-check",
                         "--autoplay-policy=no-user-gesture-required",
                         "--use-fake-ui-for-media-stream",
+                        # --test-type: Chromium'un "Desteklenmeyen komut satiri
+                        # isareti kullaniyorsunuz" sari uyari cubugunu bastirir.
+                        # Mikrofon otomatik izni aynen calisir.
+                        "--test-type",
                     ] + urls)
                     return
                 except Exception as e:  # noqa: BLE001
@@ -1013,11 +1381,29 @@ def open_browsers(host: str, port: int, delay_sec: float = 1.2,
     threading.Thread(target=_open, daemon=True).start()
 
 
+def _port_in_use(host: str, port: int) -> bool:
+    """Port zaten dinleniyor mu? Windows'ta SO_REUSEADDR yuzunden AYNI porta
+    birden cok sunucu 'basariyla' baglanabiliyor (BASLAT.bat iki kez calistirilinca
+    istekler rastgele/eski kopyaya gider — sahada 'bazen cevap yok' olarak gorulur).
+    Bu yuzden bind denemesi degil, fiilen BAGLANARAK kontrol ederiz."""
+    import socket
+    try:
+        with socket.create_connection((host, port), timeout=1.0):
+            return True
+    except OSError:
+        return False
+
+
 def main() -> None:
     config = load_config()
-    app = create_app(config)
     host = "127.0.0.1"
     port = int(config.get("web_port", 5057))
+    if _port_in_use(host, port):
+        log.error("Port %d zaten kullanimda — AICAN muhtemelen ACIK. Ikinci kopya "
+                  "baslatilmadi. Once eski pencereyi kapatin (veya gorev "
+                  "yoneticisinden python'u sonlandirin).", port)
+        return
+    app = create_app(config)
     open_control = bool(config.get("web_open_control", True))
     kiosk = bool(config.get("web_kiosk_browser", True))
     log.info("AI Body web sunucusu: http://%s:%d", host, port)

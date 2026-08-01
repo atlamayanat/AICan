@@ -163,7 +163,9 @@ def _load_word_categories(path):
 
 
 # ——— Es/Zit Anlam verisi (dostca quiz; AI sorar, kullanici cevaplar) ————
-_EA_DEFAULT_PATH = Path(__file__).resolve().parent.parent / "ai" / "es_zit_anlam.json"
+# Kaynak: cocuklar icin 30 es + 30 zit (2026-07-25). Runtime, batch on-uretim ve
+# test modu AYNI sabiti kullanir -> cache anahtarlari birebir eslesir (edge'e dusmez).
+_EA_DEFAULT_PATH = Path(__file__).resolve().parent.parent / "ai" / "es_zit_anlam_cocuklar_30_30.json"
 
 # JSON okunamazsa mod calismaya devam etsin diye kucuk gomulu yedek.
 _EA_FALLBACK = {
@@ -203,7 +205,7 @@ def _load_es_zit(path):
         return {}
 
 
-_ATASOZU_PATH = Path(__file__).resolve().parent.parent / "ai" / "atasozu.json"
+_ATASOZU_PATH = Path(__file__).resolve().parent.parent / "ai" / "atasozu50.json"
 _DY_PATH = Path(__file__).resolve().parent.parent / "ai" / "dogru_yanlis.json"
 _ATASOZU_FALLBACK = [
     {"bas": "Damlaya damlaya", "tamam": ["göl olur"]},
@@ -269,6 +271,9 @@ class _EsZitProvider(_Provider):
                 "prompt": f"'{_cap(kelime)}' kelimesinin {tip_ad} anlamlısı ne?",
                 "accept_norm": self.norm[kelime][tip],
                 "reveal": _cap(self.data[kelime][tip][0]),
+                # STT bias: kabul edilen cevaplarin ORIJINAL (Turkce harfli) halleri —
+                # web_server bunlari whisper initial_prompt'a ekler.
+                "hints": list(self.data[kelime][tip]),
                 "match": "token"}
 
 
@@ -293,6 +298,9 @@ class _AtasozuProvider(_Provider):
                 "prompt": f"'{it['bas']} …' nasıl devam eder?",
                 "accept_norm": {normalize(x) for x in it["tamam"]},
                 "reveal": f"{it['bas']} {it['tamam'][0]}",
+                # STT bias: atasozunun tam hali(leri) — cocuk devamini soylerken
+                # Whisper dogru kelimelere cekilir ("göl olur" vb.).
+                "hints": [f"{it['bas']} {t}" for t in it["tamam"][:2]],
                 "match": "substring"}
 
 
@@ -321,6 +329,7 @@ class _DogruYanlisProvider(_Provider):
                 "prompt": f"'{it['ifade']}' — doğru mu, yanlış mı?",
                 "accept_norm": set(accept),
                 "reveal": f"{dy} — {it.get('aciklama', '')}".strip(" —"),
+                "hints": ["doğru", "yanlış"],
                 "match": "token"}
 
 
@@ -358,6 +367,44 @@ def normalize(s: str) -> str:
     s = (s or "").translate(_TR_MAP).lower()
     s = re.sub(r"[^a-z0-9 ]+", " ", s)
     return re.sub(r"\s+", " ", s).strip()
+
+
+# STT'nin Turkcede en sik karistirdigi sesli/sessiz ciftleri esitle (normalize
+# SONRASI, ascii metin uzerinde): kisa/kiza, dogru/tokru gibi tanima hatalari
+# ayni fonetik iskelete duser. Sesli harf sadelestirmesi zaten _TR_MAP'te.
+_FON_MAP = str.maketrans({"z": "s", "b": "p", "d": "t", "g": "k", "v": "f"})
+
+
+def _fon(s: str) -> str:
+    return s.translate(_FON_MAP)
+
+
+def _token_yakin(w: str, hedefler) -> bool:
+    """STT token'i hedef kelimelerden birine kucuk yazim farkiyla mi benziyor?
+    Fonetik iskelet uzerinde OSA mesafesi; kisa hedefte 1, uzun hedefte 2."""
+    if len(w) < 4:
+        return False
+    fw = _fon(w)
+    for h in hedefler:
+        tol = 1 if len(h) <= 6 else 2
+        if abs(len(w) - len(h)) <= tol and \
+                GameEngine._duzenleme_mesafesi(fw, _fon(h)) <= tol:
+            return True
+    return False
+
+
+# "basla" onayinin STT'de bozulmus halleri icin fuzzy hedefler (_KEL_READY'nin
+# uzun uyeleri). Hazirlik fazinda beklenen TEK sey onay oldugundan genis tolerans
+# guvenlidir (yanlis-pozitif sadece oyunu baslatir).
+_READY_FUZZY = ("basla", "baslat", "baslayalim", "hazirim", "tamam")
+
+
+def _ready_mi(n: str) -> bool:
+    """Hazirlik onayi mi? Once birebir kume, sonra fuzzy ('batla'~'basla')."""
+    words = n.split()
+    if n in _KEL_READY or any(w in _KEL_READY for w in words):
+        return True
+    return any(_token_yakin(w, _READY_FUZZY) for w in words)
 
 
 # Hazir komut tetikleyicileri — control.js de ayni mantigi kullanir, ama
@@ -471,6 +518,7 @@ class GameEngine:
         self.quiz_score = {"dogru": 0, "toplam": 0}
         self.quiz_q_index = 0
         self.quiz_current = None
+        self.quiz_timeout_streak = 0     # ardisik cevapsiz zaman asimi sayaci
 
     # ——— Oyun oturumu loglama (gozlem; akisi DEGISTIRMEZ) ————————
     def _log_game(self, mode: str, event: str, detail: str = "") -> None:
@@ -534,18 +582,28 @@ class GameEngine:
 
     def _handle_menu(self, n: str) -> dict:
         """Menuden oyun sec (buton key'i veya dogal dil). Anlasilmazsa tekrar sor.
-        izinli_oyunlar disindaki secimler de tekrar-sor'a duser (test modu)."""
+        izinli_oyunlar disindaki secimler de tekrar-sor'a duser (test modu).
+
+        STT toleransi: bosluklu bolunme ("ata sözü") icin birlesik metin (j),
+        kucuk tanima hatalari ("atasözler", "eşit anlam") icin _token_yakin."""
         words = n.split()
-        if (n in ("kelime", "1", "bir") or "kelime" in words) and self._oyun_izinli("kelime"):
+        j = n.replace(" ", "")   # "ata sozu" -> "atasozu" (STT kelimeyi bolebilir)
+        if ((n in ("kelime", "1", "bir") or "kelime" in words or "turet" in j)
+                and self._oyun_izinli("kelime")):
             return self._start_kelime()
         # NOT: "anlam" TAM KELIME olarak aranir ('anlamadım' tetiklemesin —
         # reprompt metni bizzat "tam anlamadım" diyor, ziyaretci tekrarlayabilir).
+        # "esit": STT "eş zıt"i cok sik "eşit" diye yazar — menu baglaminda kabul.
         if ((n in ("eszit", "2", "iki") or "es" in words or "zit" in words
-                or "esanlam" in n or "zitanlam" in n or "anlam" in words)
+                or "esanlam" in j or "zitanlam" in j or "eszit" in j
+                or "anlam" in words or "esit" in words
+                or any(w.startswith("anlaml") for w in words)   # "anlamlısı" (ama "anlamadım" degil)
+                or any(_token_yakin(w, ("anlam", "eszit")) for w in words))
                 and self._oyun_izinli("eszit")):
             self.quiz_provider = "eszit"
             return self._start_quiz()
-        if ((n in ("atasozu", "3", "uc") or "atasoz" in n or "deyim" in n)
+        if ((n in ("atasozu", "3", "uc") or "atasoz" in j or "deyim" in n
+                or any(_token_yakin(w, ("atasozu",)) for w in words))
                 and self._oyun_izinli("atasozu")):
             self.quiz_provider = "atasozu"
             return self._start_quiz()
@@ -579,21 +637,32 @@ class GameEngine:
             "ended": True,
         }
 
-    def handle(self, text: str, timeout: bool = False) -> dict:
+    def handle(self, text: str, timeout: bool = False, button: bool = False) -> dict:
         """Faz'a gore girdiyi isle ve gosterilecek payload don.
 
         timeout=True: kelime oyununda ziyaretci suresi doldu sinyali.
+        button=True: girdi panel BUTONUNDAN geldi (sesli degil) — cikis komutlari
+        her fazda gecerli kalir.
         """
         n = normalize(text)
 
         # Cikis: aktif oyunda yalnizca NET komutlar ("son"/"bitti" gercek kelime olabilir);
         # diger durumda genis kelime kumesi gecerli. Timeout sinyalinde cikis kontrolu yok.
+        # AKTIF QUIZ'DE SESLI CIKIS YOK (buton haric): gurultu/yanki tek kelimelik
+        # "dur"/"çıkış" uretebiliyor ve oyunu ORTASINDA bitiriyordu. Yarisma ancak
+        # butonla, sorular bitince ya da 2 ardisik cevapsiz zaman asimiyla biter;
+        # sesli komut burada dusuk-guvenilirlikli sayilir ve normal girdi gibi islenir.
         if not timeout:
             active_game = ((self.phase == "kelime" and self.word_turn is not None) or
                            (self.phase == "quiz" and self.quiz_turn is not None))
             if active_game:
-                if n in _KEL_EXIT:
+                if n in _KEL_EXIT and (button or self.phase != "quiz"):
                     return self.exit()
+            elif self.phase == "menu" and self.voice_only and not button:
+                # Sergi menusunde SESLI cikis komutu yok: gurultu/yanki "dur"/"bitti"
+                # uretip menuyu aniden kapatabiliyordu. Menu reprompt eder; ziyaretci
+                # gercekten yoksa bosta sayaci goz moduna dondurur.
+                pass
             elif n in _EXIT_WORDS or any(w in _EXIT_WORDS for w in n.split()):
                 return self.exit()
 
@@ -620,7 +689,7 @@ class GameEngine:
                 return self._start_quiz()
             if self.quiz_turn == "hazir":
                 # kurallar anlatildi, "basla" onayini bekliyoruz
-                return self._handle_quiz_ready(text)
+                return self._handle_quiz_ready(text, button)
             return self._handle_quiz(text, timeout)
 
         # idle iken girdi gelirse menuyu ac
@@ -714,7 +783,7 @@ class GameEngine:
         # Sozlu "menü" hazirlik ekranindan ana menuye doner (quiz ile simetrik).
         if n in ("menu", "anamenu") or "menu" in n.split():
             return self.start()
-        if n in _KEL_READY or any(w in _KEL_READY for w in n.split()):
+        if _ready_mi(n):
             return self._begin_kelime()
         return self._kel_payload(
             "ready", turn="hazir", jest_id="bekle",
@@ -897,6 +966,7 @@ class GameEngine:
         self.quiz_score = {"dogru": 0, "toplam": 0}
         self.quiz_q_index = 0
         self.quiz_current = None
+        self.quiz_timeout_streak = 0
         self.quiz_turn = "hazir"
         prov = self._providers[self.quiz_provider]
         kapanis = ("Hazırsan başlayalım — 'başla' de!" if self.voice_only
@@ -906,12 +976,16 @@ class GameEngine:
             "quiz_ready", turn="hazir", jest_id=random.choice(_JEST["kel_intro"]),
             yanit=yanit, yogunluk=0.8, timer=None, buttons=self._quiz_ready_buttons())
 
-    def _handle_quiz_ready(self, text: str) -> dict:
+    def _handle_quiz_ready(self, text: str, button: bool = False) -> dict:
         n = normalize(text)
-        # Hazir ekranindaki '🏠 Menü' butonu / sozlu "menü" ana menuye doner.
-        if n in ("menu", "anamenu") or "menu" in n.split():
+        # Hazir ekranindan ana menuye donus yalnizca '🏠 Menü' BUTONUYLA (panel).
+        # Sergi (voice_only) yolunda sesli "menü" KABUL EDILMEZ: STT gurultu/yankidan
+        # "menü" uretebiliyor ve oyun ortasinda baslangic menusune donuyordu.
+        # Kullanici kurali: aktif oyunu yalniz art arda 2 cevapsiz zaman asimi bitirir.
+        if (button or not self.voice_only) and (
+                n in ("menu", "anamenu") or "menu" in n.split()):
             return self.start()
-        if n in _KEL_READY or any(w in _KEL_READY for w in n.split()):
+        if _ready_mi(n):
             return self._begin_quiz()
         bekle_txt = ("Hazır olunca 'başla' de :)" if self.voice_only
                      else "Hazır olunca 'başla' de ya da butona dokun :)")
@@ -924,6 +998,7 @@ class GameEngine:
         self.quiz_used = set()
         self.quiz_score = {"dogru": 0, "toplam": 0}
         self.quiz_q_index = 0
+        self.quiz_timeout_streak = 0
         return self._quiz_ask_next()
 
     def _quiz_ask_next(self, prefix=None, dogru_mu=None) -> dict:
@@ -954,22 +1029,58 @@ class GameEngine:
 
     def _quiz_check(self, q, text: str) -> bool:
         """Cevap kontrolu — token (kume kesisimi) veya substring (atasozu).
-        Token modunda kucuk STT/soyleyis bozulmasi tolere edilir ('berayz'~'beyaz'):
-        5-7 harfte 1, 8+ harfte 2 duzenleme mesafesi. Kisa kelimeler (<=4) tam
-        eslesme ister — 'uzun'~'uzak' gibi gercek kelime karisimlarini kabul etmemek
-        icin. Substring modu (atasozu) degismedi; orada _quiz_yakin_mi devrede."""
+
+        Cevaplar DOSYADA yazili oldugundan eslestirme STT'ye karsi hosgoruludur
+        (sergi ilkesi: yanlis RED, yanlis KABULDEN kotudur):
+        - Token: 5-7 harfte 1, 8+ harfte 2 duzenleme mesafesi; mesafe fonetik
+          iskelet uzerinde olculur ('kıza'~'kısa', 'tokru'~'dogru'). Kisa
+          kelimeler (<=4) fonetik AYNILIK ister — 'uzun'~'uzak' gibi gercek
+          kelime karisimlarina mesafe toleransi verilmez.
+        - Substring (atasozu): tam icerme YA DA kabul cevabinin ayirt edici
+          kelimelerinin cogu (fuzzy) soylenmisse dogru ('göl oldu'~'göl olur')."""
         un = normalize(text)
         if not un:
             return False
         acc = q["accept_norm"]
         if q.get("match") == "substring":
-            return any(a and (a in un or un in a) for a in acc)
+            if any(a and (a in un or un in a) for a in acc):
+                return True
+            return self._substring_yaklasik(acc, un)
         cand = {un} | set(un.split())
+        if " " in un:
+            cand.add(un.replace(" ", ""))   # STT kelimeyi boldu: "koca man"
         if acc & cand:
             return True
+        fon_cand = {_fon(c) for c in cand}
         for a in acc:
+            fa = _fon(a)
+            if fa in fon_cand:
+                return True
             tol = 2 if len(a) >= 8 else (1 if len(a) >= 5 else 0)
-            if tol and any(self._duzenleme_mesafesi(a, c) <= tol for c in cand):
+            if tol and any(self._duzenleme_mesafesi(fa, c) <= tol for c in fon_cand):
+                return True
+        return False
+
+    def _substring_yaklasik(self, acc, un: str) -> bool:
+        """Atasozu icin yaklasik dogru: kabul cevabinin ayirt edici (>=3 harf,
+        dolgu olmayan) kelimelerinin >=%60'i, fonetik/yazim toleransiyla
+        transkriptte geciyorsa dogru say. 'göl oluyor', 'iki elin sesi bar'
+        gibi STT bozulmalari boylece cevap yanmaz."""
+        tokens = un.split()
+        for a in acc:
+            a_toks = [t for t in a.split() if len(t) >= 3 and t not in self._YAKIN_STOP]
+            if not a_toks:
+                continue
+            gerek = max(1, -(-len(a_toks) * 3 // 5))   # ceil(0.6 * n)
+            hit = 0
+            for at in a_toks:
+                fat = _fon(at)
+                esik = 0 if len(at) < 4 else (1 if len(at) <= 5 else 2)
+                if any(_fon(t) == fat
+                       or (esik and self._duzenleme_mesafesi(_fon(t), fat) <= esik)
+                       for t in tokens):
+                    hit += 1
+            if hit >= gerek:
                 return True
         return False
 
@@ -1036,6 +1147,19 @@ class GameEngine:
         return False
 
     def _handle_quiz(self, text: str, timeout: bool) -> dict:
+        # Ust uste 2 soru CEVAPSIZ zaman asimina ugradiysa ziyaretci gitti say:
+        # yarismayi kapat (sergi kurali — yarim oyun ekranda asili kalmasin).
+        # Herhangi bir gercek cevap sayaci sifirlar; oyun ancak boyle, butonla
+        # ya da sorular bitince sona erer.
+        if timeout:
+            self.quiz_timeout_streak += 1
+            if self.quiz_timeout_streak >= 2:
+                self._log_game("quiz", "terk_edildi",
+                               f"tur={self.quiz_provider} "
+                               f"skor={self.quiz_score['dogru']}/{self.quiz_score['toplam']}")
+                return self.exit()
+        else:
+            self.quiz_timeout_streak = 0
         q = self.quiz_current
         beklenen = (q["reveal"] if q else "?").rstrip(" .")  # cift nokta olmasin
         self.quiz_score["toplam"] += 1
@@ -1071,10 +1195,49 @@ class GameEngine:
         else:
             jest = "huzur"; kapanis = "Önemli değil, yine beklerim!"
         yanit = f"{prefix + ' ' if prefix else ''}Bitti! {d}/{t} doğru. {kapanis}"
+        # yogunluk=0.85: ORTA-OYUN geri bildirimiyle AYNI. Son sorunun geri bildirim
+        # oneki (tezahurat + "Cevap: X.") bu payload'a eklenir; orta oyun 0.85 kullanip
+        # bu parcalari 0.85'te on-uretttiginden, oyun-sonunu da 0.85'te tutmak onbellek
+        # ISABETINI saglar (0.9 olsaydi onek/cevap parcalari edge'e duserdi). Batch
+        # (gen_batch_elevenlabs) quiz_end birimi de 0.85 uretir (yoksa Bitti/kapanis kacar).
         return self._quiz_payload(
-            "quiz_end", turn=None, jest_id=jest, yanit=yanit, yogunluk=0.9,
+            "quiz_end", turn=None, jest_id=jest, yanit=yanit, yogunluk=0.85,
             quiz_progress=f"Bitti · {d}/{t} doğru", timer=None, ended=True,
             buttons=self._quiz_end_buttons())
+
+    # ——— STT bias ipuclari ————————————————————————————————————
+    # Menu secenekleri icin Whisper'a verilecek dogal soyleyisler.
+    _MENU_STT = {
+        "kelime": ("kelime türetme",),
+        "eszit": ("eş anlam", "zıt anlam"),
+        "atasozu": ("atasözü",),
+        "dogruyanlis": ("doğru", "yanlış"),
+    }
+
+    def stt_hints(self) -> list:
+        """O anki fazda mikrofondan DUYULMASI beklenen kelimeler (Turkce harfli).
+
+        web_server /api/transcribe bunlari whisper initial_prompt'a ekler: olasi
+        cevaplar dosyadan onceden bilindigi icin Whisper dogru yazima/kelimeye
+        cekilir (serbest LLM duzeltmesi DEGIL, yalnizca cozumleme bias'i).
+        Kelime Turetme oyun fazi serbest sozcuk bekler -> ipucu verilmez."""
+        if self.phase == "menu":
+            out = []
+            for b in self._menu_buttons():
+                out.extend(self._MENU_STT.get(b["key"], ()))
+            return out
+        if self.phase == "quiz":
+            if self.quiz_turn == "hazir":
+                # "menü" BILEREK yok: bias STT'yi menuye cekip oyunu bozuyordu
+                # (sesli menu donusu zaten kapali; bkz. _handle_quiz_ready).
+                return ["başla", "hazırım"]
+            if self.quiz_turn == "soru" and self.quiz_current:
+                return list(self.quiz_current.get("hints") or [])
+            if self.quiz_turn is None:   # yarisma bitti: tekrar/menu bekleniyor
+                return ["tekrar", "menü", "çıkış"]
+        if self.phase == "kelime" and self.word_turn == "hazir":
+            return ["başla", "hazırım", "menü"]
+        return []
 
     # ——— Durum ————————————————————————————————————————————
     def status(self) -> dict:

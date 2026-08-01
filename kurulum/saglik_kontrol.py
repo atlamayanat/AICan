@@ -202,17 +202,21 @@ def kontrol_ollama(cfg: dict) -> None:
                 "kurulum/KUR.bat'ı tekrar çalıştırın")
 
 
-def kontrol_whisper() -> None:
+def kontrol_whisper(cfg: dict | None = None) -> None:
+    # Config'te SECILI modeli dogrula (kur.py da bunu indiriyor). Sergi profili
+    # large-v3-turbo; 'small' sabit kontrol edilirse dogru model varken bile
+    # yanlis "eksik" uyarisi cikardi. local_files_only=True: internet DENEME.
+    size = str((cfg or {}).get("whisper_model_size", "small"))
     try:
         from faster_whisper import WhisperModel
     except Exception as e:  # noqa: BLE001 — import (örn. DLL) hatası ayrı raporlansın
         yaz("HATA", f"faster-whisper yüklenemedi: {e}")
         return
     try:
-        WhisperModel("small", device="cpu", compute_type="int8", local_files_only=True)
-        yaz("PASS", "Whisper 'small' yerel önbellekte (sesli giriş çevrimdışı hazır)")
+        WhisperModel(size, device="cpu", compute_type="int8", local_files_only=True)
+        yaz("PASS", f"Whisper '{size}' yerel önbellekte (sesli giriş çevrimdışı hazır)")
     except Exception:  # noqa: BLE001 — yerel kopya yok/eksik
-        yaz("HATA", "Whisper 'small' yerel önbellekte YOK — internetli ortamda "
+        yaz("HATA", f"Whisper '{size}' yerel önbellekte YOK — internetli ortamda "
                     "kurulum/KUR.bat'ı tekrar çalıştırın")
 
 
@@ -272,7 +276,7 @@ def main() -> int:
         kontrol_tts_cache(cfg)
         kontrol_ollama(cfg)
         kontrol_port(cfg)
-    kontrol_whisper()
+    kontrol_whisper(cfg)
     kontrol_ses_aygitlari()
     kontrol_internet()
 

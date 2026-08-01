@@ -90,6 +90,11 @@
       els.testToggle.textContent = 'TEST: ' + (testMode ? 'AÇIK' : 'KAPALI');
       els.testToggle.classList.toggle('on', testMode);
     }
+    // Test modu: bas-konuş YOK — giriş yalnızca sergi ekranının sürekli
+    // dinlemesiyle olur. KONUŞ butonunu ve "basılı tut" durum satırını gizle.
+    // Normal modda bas-konuş fallback'i geri gelir.
+    if (els.micBtn) els.micBtn.style.display = testMode ? 'none' : '';
+    if (els.micStatus) els.micStatus.style.display = testMode ? 'none' : '';
     if (changed) {
       // Backend oyun durumunu sıfırladı — panelde eski butonlar kalmasın.
       gamePhase = null;
@@ -948,7 +953,7 @@
     }
   }
 
-  async function submitGameInput(text, displayText) {
+  async function submitGameInput(text, displayText, isButton) {
     noteActivity();
     selectDisplayOption(text, displayText || text);
     sendToDisplay({ type: 'user_text', text: displayText || text });
@@ -967,7 +972,9 @@
       const r = await fetch('/api/game/input', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text }),
+        // button: panel butonu sesli girdiden ayrilir — backend cikis komutlarini
+        // aktif quiz'de yalnizca butondan kabul eder (STT gurultu korumasi).
+        body: JSON.stringify({ text: text, button: !!isButton }),
       });
       const data = await r.json();
       if (thinkTimer) { clearTimeout(thinkTimer); thinkTimer = null; }
@@ -1146,7 +1153,7 @@
       const btn = document.createElement('button');
       btn.className = 'btn game-move' + (b.key === 'cikis' ? ' danger' : '');
       btn.textContent = b.label;
-      btn.addEventListener('click', () => submitGameInput(b.key, b.label));
+      btn.addEventListener('click', () => submitGameInput(b.key, b.label, true));
       els.gameButtons.appendChild(btn);
     });
   }

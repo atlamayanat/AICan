@@ -40,6 +40,10 @@ class FallbackEngine(TTSEngine):
     def __init__(self, primary: TTSEngine, fallback: TTSEngine) -> None:
         self.primary = primary
         self.fallback = fallback
+        # Son sentezi FIILEN hangi lef motor uretti? ("elevenlabs"/"edge"/"piper")
+        # Onbellek katmani bunu okur: yedege dusen ses, birincil motorun anahtari
+        # altina YAZILMAZ (ucretsiz ses ElevenLabs onbellegini kalici golgelemesin).
+        self.last_engine: str | None = None
 
     @property
     def sample_rate(self) -> int:
@@ -54,10 +58,14 @@ class FallbackEngine(TTSEngine):
         try:
             out = self.primary.synthesize(text, jest_id, yogunluk)
             if out:
+                # Ic ice FallbackEngine olabilir: lef motorun adini yukari tasi.
+                self.last_engine = getattr(self.primary, "last_engine", None) or self.primary.name
                 return out
             _log.warning("Birincil TTS (%s) bos dondu, yedege (%s) dusuluyor.",
                          self.primary.name, self.fallback.name)
         except Exception as e:  # noqa: BLE001 — ag/baska hata -> yedek
             _log.warning("Birincil TTS (%s) hata: %s — yedege (%s) dusuluyor.",
                          self.primary.name, e, self.fallback.name)
-        return self.fallback.synthesize(text, jest_id, yogunluk)
+        out = self.fallback.synthesize(text, jest_id, yogunluk)
+        self.last_engine = getattr(self.fallback, "last_engine", None) or self.fallback.name
+        return out

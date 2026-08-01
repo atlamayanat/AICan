@@ -3,6 +3,16 @@ ollama>=0.3
 psutil>=5.9
 flask>=3.0
 faster-whisper>=1.0
+# Gurultulu ortamda STT icin opsiyonel denoise (config.whisper_denoise_enabled).
+# Saf CPU/cevrimdisi spektral gating; librosa/numba/torch CEKMEZ (scipy+matplotlib).
+# Kurulu degilse denoise sessizce atlanir, STT ham sesle calisir.
+noisereduce>=3.0
+# GPU'da STT (whisper_device=cuda) icin CUDA 12 calisma kutuphaneleri.
+# Sistem CUDA Toolkit'i GEREKMEZ — ctranslate2 bu wheel'lardaki
+# cublas64_12.dll / cudnn dll'lerini kullanir (web_server.py yola ekler).
+# Bunlar olmadan model "yuklenir" ama ILK transkripsiyon coker.
+nvidia-cublas-cu12
+nvidia-cudnn-cu12>=9,<10
 
 # Seslendirme (TTS)
 # Birincil: edge-tts (Microsoft, ucretsiz/anahtarsiz, cevrimici, yuksek kalite)

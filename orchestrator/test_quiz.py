@@ -250,10 +250,30 @@ def test_test_modu_sinirli_menu():
 
 
 def test_quiz_exit():
+    # SESLI cikis komutu aktif yarismada ARTIK cikmaz (STT gurultusu "dur"/
+    # "çıkış" uretip oyunu ortasinda bitiriyordu) — normal girdi gibi islenir.
+    # Yarisma ancak BUTONLA, sorular bitince ya da 2 ardisik cevapsiz zaman
+    # asimiyla ("ziyaretci gitti") sona erer.
     g = make_engine()
     g.start(); g.handle("eszit"); g.handle("başla")
     p = g.handle("çıkış")
-    check("cikis -> idle", g.phase == "idle" and p["phase"] == "idle")
+    check("sesli cikis oyunu bitirmez",
+          g.phase == "quiz" and p["kind"] == "quiz_question")
+    p = g.handle("cikis", button=True)
+    check("buton cikis -> idle", g.phase == "idle" and p["phase"] == "idle")
+    g = make_engine()
+    g.start(); g.handle("eszit"); g.handle("başla")
+    g.handle("", timeout=True)
+    p = g.handle("", timeout=True)
+    check("2 ardisik timeout -> idle", g.phase == "idle" and p["kind"] == "exit")
+    g = make_engine()
+    g.start(); g.handle("eszit"); g.handle("başla")
+    g.handle("", timeout=True)
+    g.handle("beyaz")                     # araya cevap girdi -> sayac sifirlanir
+    p = g.handle("", timeout=True)
+    # TEST_EA 3 kelime: bu noktada havuz bitip normal "quiz_end" gelebilir;
+    # onemli olan terk cikisi ("exit") OLMAMASI (sayac sifirlandi).
+    check("cevap sayaci sifirlar", p["kind"] != "exit")
 
 
 # ——— HTTP (gercek JSON) ———

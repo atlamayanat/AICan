@@ -189,13 +189,19 @@ def adim_ollama(cfg: dict) -> None:
 
 
 # ——— Adım 6: Whisper ————————————————————————————————————————
-def adim_whisper() -> None:
-    baslik(6, "Whisper 'small' ses-tanıma modeli (~460 MB, ilk seferde iner)")
+def adim_whisper(cfg: dict) -> None:
+    # KRITIK: config'te SECILI modeli indir (small degil). Sergi profili
+    # large-v3-turbo kullaniyor; burada 'small' indirilirse ilk acilis ya
+    # internet ister ya da sessizce yavas CPU/small'a duser (~1 sn yerine
+    # ~3-4 sn STT). Indirme cihazdan bagimsiz (CPU/int8 ile HF reposu cekilir),
+    # bu yuzden CUDA olmadan da dogru model onbellege alinir.
+    size = str(cfg.get("whisper_model_size", "small"))
+    baslik(6, f"Whisper '{size}' ses-tanıma modeli (ilk seferde iner)")
     try:
         from faster_whisper import WhisperModel
         print("  İndiriliyor/yükleniyor — birkaç dakika sürebilir...")
-        WhisperModel("small", device="cpu", compute_type="int8")
-        print("  TAMAM — model yerel önbellekte, sergide internet gerekmez.")
+        WhisperModel(size, device="cpu", compute_type="int8")
+        print(f"  TAMAM — '{size}' modeli yerel önbellekte, sergide internet gerekmez.")
     except Exception as e:  # noqa: BLE001 — kurulum sürsün, sağlık kontrolü yakalar
         print(f"  UYARI: Whisper ön-indirme başarısız: {e}")
         print("  (Sergiden önce internetli ortamda KUR.bat'ı tekrar çalıştırın.)")
@@ -283,7 +289,7 @@ def main() -> int:
                              "sergi", a.sessiz)
     cfg = adim_profil(profil)
     adim_ollama(cfg)
-    adim_whisper()
+    adim_whisper(cfg)
     adim_elevenlabs(a.anahtar, a.sessiz)
     otomatik = a.otomatik or sor("PC açılınca oyun otomatik başlasın mı? (e/h)", "e", a.sessiz)
     adim_kisayol(otomatik)

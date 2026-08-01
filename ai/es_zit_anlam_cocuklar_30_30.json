@@ -1,0 +1,302 @@
+{
+  "ad": {
+    "es": [
+      "isim"
+    ]
+  },
+  "cevap": {
+    "es": [
+      "yanıt"
+    ]
+  },
+  "dost": {
+    "es": [
+      "arkadaş"
+    ]
+  },
+  "hediye": {
+    "es": [
+      "armağan"
+    ]
+  },
+  "hikâye": {
+    "es": [
+      "öykü"
+    ]
+  },
+  "kalp": {
+    "es": [
+      "yürek"
+    ]
+  },
+  "kelime": {
+    "es": [
+      "sözcük"
+    ]
+  },
+  "kırmızı": {
+    "es": [
+      "al"
+    ]
+  },
+  "okul": {
+    "es": [
+      "mektep"
+    ]
+  },
+  "siyah": {
+    "es": [
+      "kara"
+    ]
+  },
+  "beyaz": {
+    "es": [
+      "ak"
+    ]
+  },
+  "yıl": {
+    "es": [
+      "sene"
+    ]
+  },
+  "şehir": {
+    "es": [
+      "kent"
+    ]
+  },
+  "misafir": {
+    "es": [
+      "konuk"
+    ]
+  },
+  "doktor": {
+    "es": [
+      "hekim"
+    ]
+  },
+  "fakir": {
+    "es": [
+      "yoksul"
+    ]
+  },
+  "sebep": {
+    "es": [
+      "neden"
+    ]
+  },
+  "rüya": {
+    "es": [
+      "düş"
+    ]
+  },
+  "nehir": {
+    "es": [
+      "ırmak"
+    ]
+  },
+  "lider": {
+    "es": [
+      "önder"
+    ]
+  },
+  "yaşam": {
+    "es": [
+      "hayat"
+    ]
+  },
+  "görev": {
+    "es": [
+      "vazife"
+    ]
+  },
+  "ev": {
+    "es": [
+      "konut"
+    ]
+  },
+  "duygu": {
+    "es": [
+      "his"
+    ]
+  },
+  "anlam": {
+    "es": [
+      "mana"
+    ]
+  },
+  "güz": {
+    "es": [
+      "sonbahar"
+    ]
+  },
+  "anı": {
+    "es": [
+      "hatıra"
+    ]
+  },
+  "eser": {
+    "es": [
+      "yapıt"
+    ]
+  },
+  "doğa": {
+    "es": [
+      "tabiat"
+    ]
+  },
+  "özgür": {
+    "es": [
+      "hür"
+    ]
+  },
+  "büyük": {
+    "zit": [
+      "küçük"
+    ]
+  },
+  "uzun": {
+    "zit": [
+      "kısa"
+    ]
+  },
+  "hızlı": {
+    "zit": [
+      "yavaş"
+    ]
+  },
+  "sıcak": {
+    "zit": [
+      "soğuk"
+    ]
+  },
+  "açık": {
+    "zit": [
+      "kapalı"
+    ]
+  },
+  "yeni": {
+    "zit": [
+      "eski"
+    ]
+  },
+  "güzel": {
+    "zit": [
+      "çirkin"
+    ]
+  },
+  "iyi": {
+    "zit": [
+      "kötü"
+    ]
+  },
+  "mutlu": {
+    "zit": [
+      "üzgün"
+    ]
+  },
+  "zengin": {
+    "zit": [
+      "fakir"
+    ]
+  },
+  "güçlü": {
+    "zit": [
+      "zayıf"
+    ]
+  },
+  "kalın": {
+    "zit": [
+      "ince"
+    ]
+  },
+  "dolu": {
+    "zit": [
+      "boş"
+    ]
+  },
+  "genç": {
+    "zit": [
+      "yaşlı"
+    ]
+  },
+  "doğru": {
+    "zit": [
+      "yanlış"
+    ]
+  },
+  "ileri": {
+    "zit": [
+      "geri"
+    ]
+  },
+  "yukarı": {
+    "zit": [
+      "aşağı"
+    ]
+  },
+  "sağ": {
+    "zit": [
+      "sol"
+    ]
+  },
+  "gece": {
+    "zit": [
+      "gündüz"
+    ]
+  },
+  "ağır": {
+    "zit": [
+      "hafif"
+    ]
+  },
+  "geniş": {
+    "zit": [
+      "dar"
+    ]
+  },
+  "temiz": {
+    "zit": [
+      "kirli"
+    ]
+  },
+  "sevgi": {
+    "zit": [
+      "nefret"
+    ]
+  },
+  "cesur": {
+    "zit": [
+      "korkak"
+    ]
+  },
+  "cömert": {
+    "zit": [
+      "cimri"
+    ]
+  },
+  "çalışkan": {
+    "zit": [
+      "tembel"
+    ]
+  },
+  "tatlı": {
+    "zit": [
+      "acı"
+    ]
+  },
+  "yumuşak": {
+    "zit": [
+      "sert"
+    ]
+  },
+  "barış": {
+    "zit": [
+      "savaş"
+    ]
+  },
+  "gelmek": {
+    "zit": [
+      "gitmek"
+    ]
+  }
+}

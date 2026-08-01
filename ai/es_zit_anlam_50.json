@@ -1,0 +1,402 @@
+{
+  "büyük": {
+    "es": [
+      "iri"
+    ],
+    "zit": [
+      "küçük"
+    ]
+  },
+  "küçük": {
+    "es": [
+      "ufak"
+    ],
+    "zit": [
+      "büyük"
+    ]
+  },
+  "hızlı": {
+    "es": [
+      "çabuk"
+    ],
+    "zit": [
+      "yavaş"
+    ]
+  },
+  "yeni": {
+    "es": [
+      "taze"
+    ],
+    "zit": [
+      "eski"
+    ]
+  },
+  "güzel": {
+    "es": [
+      "hoş"
+    ],
+    "zit": [
+      "çirkin"
+    ]
+  },
+  "çirkin": {
+    "es": [
+      "biçimsiz"
+    ],
+    "zit": [
+      "güzel"
+    ]
+  },
+  "kötü": {
+    "es": [
+      "fena"
+    ],
+    "zit": [
+      "iyi"
+    ]
+  },
+  "mutlu": {
+    "es": [
+      "sevinçli"
+    ],
+    "zit": [
+      "üzgün"
+    ]
+  },
+  "üzgün": {
+    "es": [
+      "mutsuz"
+    ],
+    "zit": [
+      "mutlu"
+    ]
+  },
+  "zengin": {
+    "es": [
+      "varlıklı"
+    ],
+    "zit": [
+      "fakir"
+    ]
+  },
+  "fakir": {
+    "es": [
+      "yoksul"
+    ],
+    "zit": [
+      "zengin"
+    ]
+  },
+  "güçlü": {
+    "es": [
+      "kuvvetli"
+    ],
+    "zit": [
+      "zayıf"
+    ]
+  },
+  "zayıf": {
+    "es": [
+      "güçsüz"
+    ],
+    "zit": [
+      "güçlü"
+    ]
+  },
+  "yanlış": {
+    "es": [
+      "hatalı"
+    ],
+    "zit": [
+      "doğru"
+    ]
+  },
+  "ileri": {
+    "es": [
+      "önde"
+    ],
+    "zit": [
+      "geri"
+    ]
+  },
+  "geri": {
+    "es": [
+      "arkada"
+    ],
+    "zit": [
+      "ileri"
+    ]
+  },
+  "yukarı": {
+    "es": [
+      "üst"
+    ],
+    "zit": [
+      "aşağı"
+    ]
+  },
+  "aşağı": {
+    "es": [
+      "alt"
+    ],
+    "zit": [
+      "yukarı"
+    ]
+  },
+  "geniş": {
+    "es": [
+      "ferah"
+    ],
+    "zit": [
+      "dar"
+    ]
+  },
+  "dar": {
+    "es": [
+      "sıkışık"
+    ],
+    "zit": [
+      "geniş"
+    ]
+  },
+  "kirli": {
+    "es": [
+      "pis"
+    ],
+    "zit": [
+      "temiz"
+    ]
+  },
+  "sevgi": {
+    "es": [
+      "aşk"
+    ],
+    "zit": [
+      "nefret"
+    ]
+  },
+  "cesur": {
+    "es": [
+      "yürekli"
+    ],
+    "zit": [
+      "korkak"
+    ]
+  },
+  "korkak": {
+    "es": [
+      "ödlek"
+    ],
+    "zit": [
+      "cesur"
+    ]
+  },
+  "cömert": {
+    "es": [
+      "bonkör"
+    ],
+    "zit": [
+      "cimri"
+    ]
+  },
+  "cimri": {
+    "es": [
+      "pinti"
+    ],
+    "zit": [
+      "cömert"
+    ]
+  },
+  "çalışkan": {
+    "es": [
+      "gayretli"
+    ],
+    "zit": [
+      "tembel"
+    ]
+  },
+  "tembel": {
+    "es": [
+      "üşengeç"
+    ],
+    "zit": [
+      "çalışkan"
+    ]
+  },
+  "akıllı": {
+    "es": [
+      "zeki"
+    ],
+    "zit": [
+      "akılsız"
+    ]
+  },
+  "tatlı": {
+    "es": [
+      "şekerli"
+    ],
+    "zit": [
+      "acı"
+    ]
+  },
+  "sert": {
+    "es": [
+      "katı"
+    ],
+    "zit": [
+      "yumuşak"
+    ]
+  },
+  "sevinç": {
+    "es": [
+      "neşe"
+    ],
+    "zit": [
+      "keder"
+    ]
+  },
+  "dost": {
+    "es": [
+      "arkadaş"
+    ],
+    "zit": [
+      "düşman"
+    ]
+  },
+  "başlangıç": {
+    "es": [
+      "giriş"
+    ],
+    "zit": [
+      "son"
+    ]
+  },
+  "son": {
+    "es": [
+      "bitiş"
+    ],
+    "zit": [
+      "başlangıç"
+    ]
+  },
+  "gelmek": {
+    "es": [
+      "ulaşmak"
+    ],
+    "zit": [
+      "gitmek"
+    ]
+  },
+  "gitmek": {
+    "es": [
+      "uzaklaşmak"
+    ],
+    "zit": [
+      "gelmek"
+    ]
+  },
+  "vermek": {
+    "es": [
+      "sunmak"
+    ],
+    "zit": [
+      "almak"
+    ]
+  },
+  "gülmek": {
+    "es": [
+      "kıkırdamak"
+    ],
+    "zit": [
+      "ağlamak"
+    ]
+  },
+  "ıslak": {
+    "es": [
+      "nemli"
+    ],
+    "zit": [
+      "kuru"
+    ]
+  },
+  "tok": {
+    "es": [
+      "doymuş"
+    ],
+    "zit": [
+      "aç"
+    ]
+  },
+  "hasta": {
+    "es": [
+      "rahatsız"
+    ],
+    "zit": [
+      "sağlıklı"
+    ]
+  },
+  "eğri": {
+    "es": [
+      "çarpık"
+    ],
+    "zit": [
+      "düz"
+    ]
+  },
+  "canlı": {
+    "es": [
+      "diri"
+    ],
+    "zit": [
+      "ölü"
+    ]
+  },
+  "ölü": {
+    "es": [
+      "cansız"
+    ],
+    "zit": [
+      "canlı"
+    ]
+  },
+  "çok": {
+    "es": [
+      "fazla"
+    ],
+    "zit": [
+      "az"
+    ]
+  },
+  "kolay": {
+    "es": [
+      "basit"
+    ],
+    "zit": [
+      "zor"
+    ]
+  },
+  "zor": {
+    "es": [
+      "güç"
+    ],
+    "zit": [
+      "kolay"
+    ]
+  },
+  "gerçek": {
+    "es": [
+      "hakiki"
+    ],
+    "zit": [
+      "sahte"
+    ]
+  },
+  "sahte": {
+    "es": [
+      "taklit"
+    ],
+    "zit": [
+      "gerçek"
+    ]
+  }
+}

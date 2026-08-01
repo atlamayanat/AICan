@@ -95,10 +95,24 @@ def build_units(ge):
     ge.izinli_oyunlar = TEST_OYUNLAR
     tm_menu = ge._menu_payload()
     add("menu_test",
-        [_test_greeting_yanit(tm_menu), tm_menu["yanit"],
+        [_test_greeting_yanit(), tm_menu["yanit"],
          ge._menu_payload(reprompt=True)["yanit"], TEST_SOHBET_KAPALI_TEXT],
         [_JEST["menu"], SESSION_GREETING_JEST], 0.8)
     ge.izinli_oyunlar = eski_izin
+    # KIOSK (panelsiz sergi) voice_only=True kullanir -> menu birincil metni
+    # "Söyle: ..." olur ("Dokun ya da söyle" YERINE; bkz game_engine._menu_payload).
+    # Batch varsayilani voice_only=False oldugundan bu varyant SADECE web_server
+    # startup pre-warm'u ile cache'lenirdi (kirilgan; ozellikle NON-test 4-oyunlu
+    # menu hic uretilmiyordu). Burada dogrudan uret: hem tum oyunlar (non-test)
+    # hem TEST_OYUNLAR (test modu). Zaten cache'te olan atlanir (kredi harcanmaz).
+    eski_vo = ge.voice_only
+    ge.voice_only = True
+    vo_menu = [ge._menu_payload()["yanit"]]              # tum oyunlar (non-test kiosk)
+    ge.izinli_oyunlar = TEST_OYUNLAR
+    vo_menu.append(ge._menu_payload()["yanit"])          # test modu kiosk
+    ge.izinli_oyunlar = eski_izin
+    ge.voice_only = eski_vo
+    add("menu_voice", vo_menu, [_JEST["menu"], SESSION_GREETING_JEST], 0.8)
     add("exit", list(_TXT["exit"]), [_JEST["exit"]], 0.6)
     add("kelime_kural", [KELIME_KURAL_TEXT], _JEST["kel_intro"], 0.8)
     add("hazir_bekle", [HAZIR_BEKLE_TEXT], ["bekle"], 0.6)
@@ -141,13 +155,18 @@ def build_units(ge):
     fb += ["Süre doldu!"]                                  # zaman asimi
     add("quiz_feedback", fb, _JEST["kel_user_ok"] + _JEST["kel_retry"], 0.85)
 
-    # 5) Quiz bitisi: "Bitti!" min_len altinda kaldigi icin skor cumlesiyle
-    # BIRLESIR -> tum ulasilabilir skor varyantlari (d <= t <= soru sayisi)
-    # birlesik haliyle on-uretilir; kapanis replikleri ayri cumle.
+    # 5) Quiz bitisi (yog=0.85, _quiz_end ile AYNI): "Bitti!" min_len altinda kaldigi
+    # icin skor cumlesiyle BIRLESIR -> tum ulasilabilir skor varyantlari
+    # (d <= t <= soru sayisi) birlesik haliyle on-uretilir; kapanis replikleri ayri.
+    # AYRICA son sorunun geri bildirim oneki (tezahurat/onek + "Cevap: X.") _quiz_end
+    # payload'ina EKLENIR ve OYUN-SONU jest havuzuyla + yog=0.85'te seslendirilir;
+    # bu yuzden fb (feedback cumleleri) burada da uretilmeli — aksi halde son sorunun
+    # onek/cevap parcasi (orta oyun jest havuzunda uretildigi icin) edge'e duser.
     n_q = GameEngine.QUIZ_QUESTION_COUNT
     bitis = [f"Bitti! {d}/{t} doğru." for t in range(1, n_q + 1) for d in range(0, t + 1)]
     bitis += ["Harikasın!", "Güzel oynadın!", "Önemli değil, yine beklerim!"]
-    add("quiz_end", bitis, _JEST["kel_user_ok"] + _JEST["kel_intro"] + ["huzur"], 0.9)
+    bitis += fb   # tezahurat + "Cevap: X." + yakin/yanlis onekleri + "Süre doldu!"
+    add("quiz_end", bitis, _JEST["kel_user_ok"] + _JEST["kel_intro"] + ["huzur"], 0.85)
 
     return U
 

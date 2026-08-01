@@ -271,6 +271,10 @@
   async function speak(text, jestId, yogunluk) {
     if (!ttsEnabled || !text) return;
     stopSpeech();
+    // Yankı filtresi referansı: mikrofon TTS çalarken kayıt yaparsa sunucu,
+    // transkripti bu metinlerle kıyaslayıp salt yankıyı atar (viTranscribeAndSend).
+    viTtsRecent.push(String(text));
+    if (viTtsRecent.length > 2) viTtsRecent.shift();
     const token = speakToken;
     const yog = (typeof yogunluk === 'number' ? yogunluk : 0.7);
     try {
@@ -388,7 +392,7 @@
   // Herhangi bir gerçek etkileşim mesajı attract'ı anında kapatır.
   const ATTRACT_MSGS = ['Bana bir soru sor!', 'Benimle oyun oyna!', 'Sana uzayı anlatayım mı?'];
   // Test modunda sohbet kapalı — davet metinleri yalnızca oyuna çağırır.
-  const ATTRACT_MSGS_TEST = ['Benimle oyun oyna!', 'Atasözü tamamlayalım mı?', 'Eş ve zıt anlamlıları bilir misin?'];
+  const ATTRACT_MSGS_TEST = ['Hadi oyun oynayalım!', 'Atasözü tamamlayalım mı?', 'Eş ve zıt anlamlıları biliyor musun ?'];
   function attractMsgs() { return testModeOn ? ATTRACT_MSGS_TEST : ATTRACT_MSGS; }
 
   // ——— Test modu göstergesi ('g' tuşu; durum backend'de) ————————————
@@ -443,6 +447,12 @@
   function attractShow() {
     if (!els.attractBox || attractActive) return;
     attractActive = true;
+    // Bekleme moduna girişte LED HEMEN "canlı göz" animasyonuna geçsin —
+    // oyun-sonu geçişi 30 sn'lik eye-idle sayacını beklemesin (bitiş mesajı →
+    // skor → doğrudan gözlü bekleme ekranı). Sonraki etkileşim noteInteraction
+    // ile gözü kapatır.
+    if (eyeIdleTimer) { clearTimeout(eyeIdleTimer); eyeIdleTimer = null; }
+    if (panel) panel.setEyeIdle(true);
     attractIdx = 0;
     if (els.attractCount) els.attractCount.classList.add('hidden');
     if (els.attractMsg) {
@@ -748,14 +758,23 @@
   // (sergi kurulumu: yalnız bu ekran) ekran-içi sürücü (drvHandleText) işler.
   // Bas-tut sistemi kontrol panelinde fallback kalır.
   //
-  // Yankı koruması: TTS bu ekranın hoparlöründen çaldığı için, AI çıktı
-  // verirken (stThinking/stSpeaking/stTyping) kayıt tamamen durur; mikrofon
-  // AI'nın kendi sesini yakalayamaz. Ayrıca echoCancellation açık.
+  // Yankı koruması: AI DÜŞÜNÜRKEN (stThinking, çalan ses yok) kayıt durur.
+  // AI KONUŞURKEN (stSpeaking, TTS) davranış holdDuringSpeech ile belirlenir:
+  //  • holdDuringSpeech=true (VARSAYILAN, kullanıcı isteği): AI KESİLMEZ.
+  //    Mikrofon açık kalır; ekranın kendi TTS yankısının ÜSTÜNDE (bargeInMult ile
+  //    yükseltilen eşik) GERÇEK konuşma duyulursa kayıt sürer ama GÖNDERİLMEZ.
+  //    AI cümlesini bitirince (stSpeaking=false) biriken söz normal endpointing
+  //    ile transkribe edilip cevap olarak işlenir. Kişi araya girse de AI susmaz.
+  //  • holdDuringSpeech=false: eski BARGE-IN — eşik bargeInMult ile yükseltilir,
+  //    kullanıcı yeterince yüksek+sürekli konuşursa TTS kesilip hemen kaydeder.
+  // bargeIn=false + holdDuringSpeech=false ile eski "konuşurken sağır" davranış.
   const VI = {
     enabled: true,          // özellik açık mı (config.voice_input.enabled)
     autostart: true,        // ilk dokunuşta kendiliğinden başlasın mı
     silenceMs: 1000,        // sustuktan sonra "cümle bitti" sayma süresi
     minSpeechMs: 350,       // bundan kısa ses = gürültü, gönderme
+    silenceMsGame: 600,     // oyun modunda tek-kelime cevap → daha erken "bitti"
+    minSpeechMsGame: 250,   // oyun modunda kısa komut ("taş") de geçerli
     maxUtteranceMs: 12000,  // güvenlik tavanı — tek konuşma bu kadar sürer
     onsetMult: 2.2,         // konuşma eşiği = gürültü_tabanı * mult
     absMinRms: 0.012,       // mutlak alt eşik (sessiz odada bile bu kadar gerek)
@@ -763,7 +782,17 @@
     echoCancellation: true, // hoparlör yankısını bastır (TTS aynı ekrandan çalıyor)
     noiseSuppression: true, // Chrome DSP — uzak konuşmacıda Whisper'ı bozabilir, A/B için config'ten
     autoGain: true,         // AGC — sessizlikte kazancı yükseltip VAD eşiğini şaşırtabilir
+    bargeIn: true,          // (holdDuringSpeech=false iken) kullanıcı araya girince TTS kesilsin
+    bargeInMult: 2.2,       // TTS sırasında konuşma eşiği bu katsayıyla yükseltilir (echo artığı sayılmasın)
+    bargeInMinMs: 280,      // barge-in için gereken sürekli yüksek-ses süresi
+    holdDuringSpeech: true, // AI konuşurken kesme; söyleneni biriktir, AI bitince cevaba çevir
   };
+  // AI konuşması biterken biriken kaydın başındaki yankı/sessizlik sunucuda
+  // kırpılır (trim_ms). Bu sabit, yankı-yalnız kaydın en fazla ne kadar
+  // birikeceğini sınırlar: kayıt bu yaştan eskiyse tazelenir (blob küçük kalsın).
+  const VI_HOLD_REFRESH_MS = 1200;
+  // Konuşma başlangıcından bu kadar önce kırp (ilk sessiz ünsüzler kaybolmasın).
+  const VI_TRIM_PAD_MS = 350;
   let viActive = false;          // dinleme fiilen açık mı (mic akışı var)
   let viStream = null;
   let viCtx = null;
@@ -783,12 +812,94 @@
   let viBusyTranscribe = false;  // aynı anda tek transkripsiyon
   let viHoldUntil = 0;           // bu ana kadar yeni kayıt başlatma (cooldown)
   let viWasGated = false;
+  let viBargeStart = 0;          // AI konuşurken sürekli yüksek-sesin başladığı an (barge-in)
   let viShowListening = false;   // rozet durumu takibi (spam engelle)
+  let viMicWarnEl = null;        // mikrofon açılamadı uyarısı (görünür)
+  let viOverlapTts = false;      // bu kayıt TTS çalarken mi sürdü (yankı riski → echo_text gönder)
+  let viWasSpeakingTick = false; // önceki tick'te stSpeaking var mıydı (bitiş geçişini yakala)
+  let viPendingBlob = null;      // STT meşgulken biten SON söz — düşürme, sıraya al (tek slot)
+  let viTtsRecent = [];          // son çalınan 1-2 TTS metni (yankı filtresi referansı)
+  let viHintEl = null;           // "duyamadım" geçici bildirimi
+  let viHintLastAt = 0;
 
-  // AI çıktı veriyorsa dinleme (yankı + sıra karışması engeli). Attract'ta
-  // dinlemeye DEVAM ederiz ki gelen ziyaretçi konuşunca uyansın.
-  function viGated() {
-    return stThinking || stSpeaking || stTyping;
+  // Oyun modunda (drvGamePhase dolu) tek-kelime cevap beklenir; "cümle bitti"
+  // ve "yeterince konuştu" eşiklerini kısaltmak tur başına ~400 ms gecikme
+  // kazandırır. Sohbet modunda taban değerler kullanılır (doğal konuşma bölünmesin).
+  function viSilenceMs() {
+    return (drvGamePhase && VI.silenceMsGame) ? VI.silenceMsGame : VI.silenceMs;
+  }
+  function viMinSpeechMs() {
+    return (drvGamePhase && VI.minSpeechMsGame) ? VI.minSpeechMsGame : VI.minSpeechMs;
+  }
+
+  // Mikrofon başlatılamadığında operatör görsün: sessiz console.warn yerine
+  // ekranda kalıcı uyarı. Sürekli dinleme açılınca kendiliğinden kaybolur.
+  function setMicWarn(on) {
+    if (!viMicWarnEl) {
+      if (!on) return;
+      viMicWarnEl = document.createElement('div');
+      viMicWarnEl.style.cssText =
+        'position:fixed;bottom:10px;right:12px;z-index:60;pointer-events:none;' +
+        'font:600 11px/1.4 monospace;letter-spacing:1px;color:rgba(255,90,90,0.75);';
+      viMicWarnEl.textContent = '🎤 MİKROFON YOK — izin verin / cihazı bağlayın';
+      document.body.appendChild(viMicWarnEl);
+    }
+    viMicWarnEl.style.display = on ? 'block' : 'none';
+  }
+
+  // Konuşma algılandı ama Whisper metin çıkaramadı ("hiç almıyor" hissinin en
+  // sinsi hali: sistem duydu ama sessiz kaldı). Ziyaretçi/operatör GÖRSÜN diye
+  // kısa bildirim — TTS harcamaz, 4 sn'de en fazla bir kez.
+  function viShowHint(msg) {
+    const now = Date.now();
+    if (now - viHintLastAt < 4000) return;
+    viHintLastAt = now;
+    if (!viHintEl) {
+      viHintEl = document.createElement('div');
+      viHintEl.style.cssText =
+        'position:fixed;bottom:56px;left:50%;transform:translateX(-50%);z-index:60;' +
+        'pointer-events:none;padding:10px 18px;border-radius:12px;' +
+        'background:rgba(0,0,0,0.72);border:1px solid rgba(120,220,255,0.35);' +
+        'font:600 16px/1.4 system-ui,sans-serif;color:#cfeaff;';
+      document.body.appendChild(viHintEl);
+    }
+    viHintEl.textContent = msg;
+    viHintEl.style.display = 'block';
+    setTimeout(() => { if (viHintEl) viHintEl.style.display = 'none'; }, 2200);
+  }
+
+  // ——— Mikrofon seviye göstergesi ('m' ile aç/kapa) ————————————————
+  // Sahada "ses algılamıyor" şikayetinde GÖZLE teşhis: canlı RMS çubuğu,
+  // eşik çizgisi ve durum. Çubuk kırmızı çizgiyi geçmiyorsa mikrofon kazancı
+  // düşük (Windows ses ayarı) ya da config eşiği yüksek demektir.
+  let viDbgEl = null;
+  let viDbgOn = false;
+  function viDebugUpdate(state, rms, thr) {
+    if (!viDbgOn || !viDbgEl) return;
+    const pct = Math.min(100, Math.round((rms || 0) * 2500));
+    const thrPct = Math.min(100, Math.round((thr || 0) * 2500));
+    viDbgEl.innerHTML =
+      '🎤 ' + state
+      + '<br>rms ' + (rms == null ? '—' : rms.toFixed(4))
+      + ' / eşik ' + (thr == null ? '—' : thr.toFixed(4))
+      + ' / taban ' + viNoiseFloor.toFixed(4)
+      + '<div style="position:relative;height:8px;margin-top:4px;background:#123;border-radius:3px;">'
+      +   '<div style="position:absolute;left:0;top:0;bottom:0;width:' + pct + '%;'
+      +     'background:' + ((rms || 0) > (thr || 1) ? '#4f8' : '#29f') + ';border-radius:3px;"></div>'
+      +   '<div style="position:absolute;left:' + thrPct + '%;top:-2px;bottom:-2px;width:2px;background:#f66;"></div>'
+      + '</div>';
+  }
+  function viDebugToggle() {
+    viDbgOn = !viDbgOn;
+    if (viDbgOn && !viDbgEl) {
+      viDbgEl = document.createElement('div');
+      viDbgEl.style.cssText =
+        'position:fixed;bottom:10px;left:12px;z-index:60;padding:8px 10px;pointer-events:none;'
+        + 'background:rgba(0,0,0,0.72);border:1px solid rgba(120,220,255,0.35);border-radius:6px;'
+        + 'font:600 11px/1.5 monospace;color:#9fdcff;min-width:240px;';
+      document.body.appendChild(viDbgEl);
+    }
+    if (viDbgEl) viDbgEl.style.display = viDbgOn ? 'block' : 'none';
   }
 
   function viSetListeningBadge(on) {
@@ -823,6 +934,7 @@
     viChunks = [];
     viHadSpeech = false;
     viSpeechStartAt = 0;
+    viOverlapTts = false;
     viPendingAction = null;
     viStopping = false;
     viRecStartAt = performance.now();
@@ -837,58 +949,194 @@
     const chunks = viChunks; viChunks = [];
     const hadSpeech = viHadSpeech;
     const durMs = performance.now() - viRecStartAt;
+    // Konuşma başlangıcından öncesi sunucuda kırpılsın: kayıt sürekli açık
+    // olduğundan blob'un başında sessizlik/TTS yankısı birikir — Whisper'a
+    // girmesi hem yavaşlatır hem AI'nın kendi cümlesini "duymasına" yol açar.
+    const trimMs = (hadSpeech && viSpeechStartAt > viRecStartAt)
+      ? Math.max(0, Math.round(viSpeechStartAt - viRecStartAt - VI_TRIM_PAD_MS)) : 0;
+    const overlapTts = viOverlapTts;
     viRec = null;       // sonraki tick yeni kayıt açar (cooldown'a göre)
     viStopping = false; // artık güvenle yeniden başlatılabilir
-    if (action === 'send' && hadSpeech && chunks.length && durMs >= VI.minSpeechMs) {
+    if (action === 'send' && hadSpeech && chunks.length && durMs >= viMinSpeechMs()) {
       const blob = new Blob(chunks, { type: viMime || 'audio/webm' });
-      viTranscribeAndSend(blob);
+      viTranscribeAndSend(blob, trimMs, overlapTts);
     }
   }
 
-  async function viTranscribeAndSend(blob) {
-    if (viBusyTranscribe) return;
+  async function viTranscribeAndSend(blob, trimMs, overlapTts) {
+    // SES GİRDİSİ = ETKİNLİK: transkript boş dönse bile ("Duyamadım") ziyaretçi
+    // KONUŞUYORDUR — boşta sayacı sıfırlanır. Aksi halde tanınmayan denemeler
+    // birikip oyun ORTASINDA attract/sıfırlamayı tetikliyordu.
+    drvLastActivityAt = Date.now();
+    if (viBusyTranscribe) {
+      // Önceki STT sürerken biten söz DÜŞMESİN (eski davranış sessizce atıyordu
+      // → "hiç almıyor"). En son söz tek slotta bekler; mevcut istek bitince işlenir.
+      viPendingBlob = { blob: blob, trimMs: trimMs, overlapTts: overlapTts };
+      return;
+    }
     viBusyTranscribe = true;   // viHoldUntil zaten viStopRecorder('send')'de ayarlandı
+    const t0 = performance.now();
     try {
       const fd = new FormData();
       fd.append('audio', blob, 'utt.webm');
-      const r = await fetch('/api/transcribe', { method: 'POST', body: fd });
+      if (trimMs > 0) fd.append('trim_ms', String(trimMs));
+      // Kayıt TTS çalarken sürdüyse son çalan metni gönder: sunucu, transkript
+      // salt yankıysa (AI kendi cümlesini duyduysa) atar.
+      if (overlapTts && viTtsRecent.length) {
+        fd.append('echo_text', viTtsRecent.join(' ').slice(-600));
+      }
+      // Oyun modunda kısa komut sözlüğüne bias ver (backend WHISPER_GAME_PROMPT).
+      if (drvGamePhase) fd.append('context', 'game');
+      // ZAMAN AŞIMI ŞART: /api/transcribe sunucuda takılırsa (CUDA kütüphane
+      // hatası vb.) yanıtsız fetch viBusyTranscribe'ı SONSUZA DEK true bırakır
+      // → mikrofon "duyar" ama hiçbir söz işlenmez (sahada yaşanan sağırlık).
+      // 25 sn'de iptal et; finally bayrağı bırakır, döngü kendini toparlar.
+      const ctl = new AbortController();
+      const tid = setTimeout(() => ctl.abort(), 25000);
+      let r;
+      try {
+        r = await fetch('/api/transcribe', { method: 'POST', body: fd, signal: ctl.signal });
+      } finally {
+        clearTimeout(tid);
+      }
       const data = await r.json();
       const txt = ((data && data.text) || '').trim();
+      const m = (data && data.meta) || {};
+      console.info('VI: stt toplam ' + Math.round(performance.now() - t0) + ' ms'
+        + ' | model ' + (m.stt_ms || 0) + ' ms | ses ' + (m.duration_s || 0).toFixed(1) + ' sn'
+        + (m.trim_ms ? ' | trim ' + m.trim_ms + ' ms' : '')
+        + (txt ? '' : ' | SONUÇ BOŞ (' + ((data && data.warning) || '?') + ')'));
       if (txt) {
         if (bc && panelAlive()) {
           bc.postMessage({ type: 'voice_input', text: txt });  // panel açık: oradan işlenir
         } else {
           drvHandleText(txt);   // panelsiz sergi: ekran-içi sürücü işler
         }
+      } else if (data && data.warning === 'no_speech') {
+        // Ses vardı ama metin çıkmadı (uzak/kısık konuşma) — sessiz kalma,
+        // görünür geri bildirim ver. Yankı ataması (tts_echo) kasıtlı sessizdir.
+        viShowHint('🙉 Duyamadım — biraz yaklaşıp tekrar söyler misin?');
       }
     } catch (e) {
       console.warn('VI: transkripsiyon hatası', e);
     } finally {
+      drvLastActivityAt = Date.now();  // uzun STT de boşta sayılmaz
       viBusyTranscribe = false;
+      if (viPendingBlob) {       // sırada bekleyen söz varsa hemen işle
+        const p = viPendingBlob; viPendingBlob = null;
+        viTranscribeAndSend(p.blob, p.trimMs, p.overlapTts);
+      }
     }
   }
 
   function viMonitorTick() {
     if (!viActive || !viAnalyser) return;
+    // KRİTİK: AudioContext askıdaysa (arka plan sekmesi / autoplay politikası)
+    // analyser SIFIR okur → RMS hep 0 → ne kadar bağırılsa da konuşma algılanmaz
+    // ("mikrofon ses almıyor" hissi). Her tik'te canlı tutmayı dene; askıda
+    // kaldıkça görünür uyarı ver (kiosk bayrakları yoksa sekmeyi öne al / tıkla).
+    if (viCtx && viCtx.state === 'suspended') {
+      viCtx.resume().catch(() => {});
+      setMicWarn(true);
+      viDebugUpdate('AudioContext ASKIDA (ekrana tıkla)', null, null);
+      return;   // askıdayken ölçüm anlamsız
+    }
+    if (viMicWarnEl && viMicWarnEl.style.display === 'block') setMicWarn(false);
     const now = performance.now();
 
-    // Gate: AI çıktı veriyorsa kaydı at ve dinlemeyi askıya al
-    if (viGated()) {
-      if (viRec && viRec.state === 'recording') viStopRecorder('discard');
-      viWasGated = true;
-      viSetListeningBadge(false);
-      return;
-    }
-    // Gate yeni kalktıysa: AI'nın son hecesini yakalamamak için kısa bekle
-    if (viWasGated) { viWasGated = false; viHoldUntil = now + VI.cooldownMs; }
-
-    // RMS (ses seviyesi) ölç
+    // ——— RMS (ses seviyesi) ölç — barge-in kararı da buna bakar ———
     viAnalyser.getFloatTimeDomainData(viData);
     let sum = 0;
     for (let i = 0; i < viData.length; i++) sum += viData[i] * viData[i];
     const rms = Math.sqrt(sum / viData.length);
-    const thr = Math.max(VI.absMinRms, viNoiseFloor * VI.onsetMult);
-    const loud = rms > thr;
+    const baseThr = Math.max(VI.absMinRms, viNoiseFloor * VI.onsetMult);
+
+    // SERT KAPI: yalnızca AI DÜŞÜNÜRKEN (sunucu meşgul, çalan ses YOK) → kaydı at.
+    if (stThinking) {
+      if (viRec && viRec.state === 'recording') viStopRecorder('discard');
+      viWasGated = true;
+      viSetListeningBadge(false);
+      viDebugUpdate('AI düşünüyor — dinleme duraklatıldı', rms, baseThr);
+      return;
+    }
+
+    // AI KONUŞURKEN (TTS çalıyor). İki mod:
+    if (stSpeaking) {
+      viWasSpeakingTick = true;                          // bitiş geçişi aşağıda yakalanır
+      if (viRec && viRec.state === 'recording') viOverlapTts = true;  // yankı riski işareti
+      const bThr = baseThr * VI.bargeInMult;   // ekranın kendi yankısının üstündeki eşik
+
+      // ——— holdDuringSpeech: AI'yı KESME, söyleneni BİRİKTİR ———
+      // Mikrofon açık; kayıt sürer ama GÖNDERİLMEZ. bThr üstünde gerçek konuşma
+      // duyulursa viHadSpeech işaretlenir (yalnız echo ise işaretlenmez → gönderilmez).
+      // stSpeaking false olunca (AI cümlesini bitirince) aşağıdaki normal
+      // endpointing biriken kaydı transkribe edip cevap olarak işler.
+      if (VI.holdDuringSpeech) {
+        viWasGated = false;   // konuşma bitince cooldown ekleme → kayıt sürekliliği bozulmasın
+        if ((!viRec || viRec.state !== 'recording') && !viStopping && now >= viHoldUntil) {
+          viStartRecorder();  // yoksa başlat (echo dolu ama bThr geçilene dek viHadSpeech=false)
+        }
+        if (viRec && viRec.state === 'recording') {
+          if (rms > bThr) {                     // ekranın yankısının üstünde → gerçek konuşma
+            viLastLoudAt = now;
+            if (!viHadSpeech) viSpeechStartAt = now;
+            viHadSpeech = true;
+          }
+          const sinceStart = now - viRecStartAt;
+          if (viHadSpeech && sinceStart >= VI.maxUtteranceMs) {
+            viStopRecorder('send');             // güvenlik tavanı (çok uzun): yine de gönder
+          } else if (!viHadSpeech && sinceStart >= VI_HOLD_REFRESH_MS) {
+            viStopRecorder('discard');          // yalnız yankı birikti → sık tazele (blob kısa kalsın)
+          }
+        }
+        viSetListeningBadge(false);
+        viDebugUpdate(viHadSpeech ? 'AI konuşuyor — sözünüz bekletiliyor'
+                                  : 'AI konuşuyor (dinliyor)', rms, bThr);
+        return;                                 // TTS sürsün; AI kesilmez
+      }
+
+      // ——— BARGE-IN (holdDuringSpeech=false): kullanıcı araya girerse TTS'i kes ———
+      if (VI.bargeIn && rms > bThr) {
+        if (!viBargeStart) viBargeStart = now;
+        if (now - viBargeStart >= VI.bargeInMinMs) {
+          stopSpeech();               // AI'yı kes (çalan ses + kuyruk)
+          viBargeStart = 0;
+          viWasGated = false;         // barge-in: cooldown BEKLEME, hemen kaydet
+          viHoldUntil = 0;
+          // aşağı düş → normal kayıt başlasın (artık stSpeaking=false)
+        } else {
+          viSetListeningBadge(false);
+          viDebugUpdate('AI konuşuyor — araya girme dinleniyor', rms, bThr);
+          return;                     // henüz yeterli değil, TTS sürsün
+        }
+      } else {
+        viBargeStart = 0;
+        viSetListeningBadge(false);
+        viDebugUpdate('AI konuşuyor (araya girmeye hazır)', rms, bThr);
+        return;                       // TTS artığı/gürültü → dinle ama kaydetme
+      }
+    }
+
+    // Gate yeni kalktıysa (düşünme/konuşma bitti): AI'nın son hecesini yakalamamak
+    // için kısa bekle. (Barge-in ile geldiyse yukarıda viWasGated=false yapıldı.)
+    if (viWasGated) { viWasGated = false; viHoldUntil = now + VI.cooldownMs; }
+
+    // AI konuşması YENİ bitti ve biriken kayıtta gerçek söz yok → içerik salt
+    // yankı/sessizlik. At ki sonraki cevap TERTEMİZ bir kayda girsin (yankının
+    // Whisper'a gidip AI'nın kendi cümlesi olarak dönmesi = "yanlış alıyor").
+    if (viWasSpeakingTick) {
+      viWasSpeakingTick = false;
+      if (viRec && viRec.state === 'recording' && !viHadSpeech) {
+        viStopRecorder('discard');   // 1 tick (50 ms) sonra taze kayıt açılır
+      }
+    }
+
+    const loud = rms > baseThr;
+    viDebugUpdate(
+      (viRec && viRec.state === 'recording')
+        ? (viHadSpeech ? 'KAYIT — konuşma algılandı' : 'KAYIT — konuşma bekleniyor')
+        : 'DİNLİYOR (boşta)',
+      rms, baseThr);
 
     // Kayıt yoksa (ve bir stop işlenmiyorsa, cooldown bittiyse) başlat;
     // bu arada rozeti "dinliyor" yap.
@@ -909,9 +1157,8 @@
 
     // ANLIK SELAM (test modu, panelsiz): boştayken ses duyulur duyulmaz —
     // çeviriyi BEKLEMEDEN — selamla + oyun sorusunu sor. Segment atılır;
-    // içerik zaten kullanılmazdı (boşta her söz selama gider). Selam TTS'i
-    // çalarken viGated() kaydı durdurur, selam sonrası phase='menu'
-    // olduğundan koşul tekrar sağlanmaz.
+    // içerik zaten kullanılmazdı (boşta her söz selama gider). Selam sonrası
+    // phase='menu' olduğundan bu koşul (!drvGamePhase) tekrar sağlanmaz.
     if (viHadSpeech && (now - viSpeechStartAt) >= VI.minSpeechMs
         && testModeOn && !panelAlive() && !drvGamePhase && !drvBusyActive()) {
       viStopRecorder('discard');
@@ -922,22 +1169,25 @@
     const sinceStart = now - viRecStartAt;
     const sinceLoud = now - viLastLoudAt;
 
-    if (viHadSpeech && sinceLoud >= VI.silenceMs && sinceStart >= VI.minSpeechMs) {
+    if (viHadSpeech && sinceLoud >= viSilenceMs() && sinceStart >= viMinSpeechMs()) {
       viStopRecorder('send');        // kişi sustu → gönder
     } else if (viHadSpeech && sinceStart >= VI.maxUtteranceMs) {
       viStopRecorder('send');        // güvenlik tavanı
-    } else if (!viHadSpeech && sinceStart >= VI.silenceMs * 4) {
+    } else if (!viHadSpeech && sinceStart >= viSilenceMs() * 4) {
       viStopRecorder('discard');     // sadece sessizlik birikti → tazele (taban güncel kalsın)
     }
   }
 
+  // Dönüş: true = dinleme açıldı, false = açılamadı (çağıran tekrar dener).
   async function viEnable() {
-    if (viActive || !VI.enabled) return;
+    if (viActive) return true;
+    if (!VI.enabled) return false;
     const AudioCtx = window.AudioContext || window.webkitAudioContext;
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia
         || typeof MediaRecorder === 'undefined' || !AudioCtx) {
       console.warn('VI: tarayıcı mikrofon/AudioContext API desteklemiyor');
-      return;
+      setMicWarn(true);
+      return false;
     }
     try {
       viStream = await navigator.mediaDevices.getUserMedia({
@@ -950,7 +1200,8 @@
       });
     } catch (e) {
       console.warn('VI: mikrofon reddedildi/yok —', e.name);
-      return;
+      setMicWarn(true);   // görünür uyarı; kendini-onaran döngü tekrar dener
+      return false;
     }
     viMime = '';
     for (const m of ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus']) {
@@ -960,7 +1211,9 @@
       viCtx = new AudioCtx();
       const src = viCtx.createMediaStreamSource(viStream);
       viAnalyser = viCtx.createAnalyser();
-      viAnalyser.fftSize = 1024;
+      // 2048 örnek @48kHz ≈ 43 ms pencere: 50 ms'lik tick'in neredeyse tamamı
+      // ölçülür (1024=21 ms'de kısa/sessiz ünsüz başlangıçları kaçabiliyordu).
+      viAnalyser.fftSize = 2048;
       viData = new Float32Array(viAnalyser.fftSize);
       src.connect(viAnalyser);       // destination'a BAĞLAMA → geri besleme yok
       if (viCtx.state === 'suspended') viCtx.resume().catch(() => {});
@@ -975,7 +1228,8 @@
     } catch (e) {
       console.warn('VI: AudioContext kurulamadı', e);
       viDisable();
-      return;
+      setMicWarn(true);
+      return false;
     }
     viActive = true;
     viNoiseFloor = 0.01;
@@ -983,7 +1237,9 @@
     viHoldUntil = performance.now() + 500;
     if (viMonitorId) clearInterval(viMonitorId);
     viMonitorId = setInterval(viMonitorTick, 50);
+    setMicWarn(false);   // açıldı → uyarıyı kaldır
     console.info('VI: sürekli sesli giriş AÇIK');
+    return true;
   }
 
   function viDisable() {
@@ -998,7 +1254,14 @@
     console.info('VI: sürekli sesli giriş KAPALI');
   }
 
-  function viToggle() { if (viActive) viDisable(); else viEnable(); }
+  // viWantOn: sürekli dinlemenin AÇIK OLMASI isteniyor mu? Kendini-onaran
+  // döngü yalnız bu true iken tekrar dener; 'd' ile elle kapatınca döngü
+  // mikrofonu inatla geri açmaz.
+  let viWantOn = false;
+  function viToggle() {
+    if (viActive) { viWantOn = false; setMicWarn(false); viDisable(); }
+    else { viWantOn = true; viEnable(); }
+  }
 
   async function loadVoiceInputConfig() {
     try {
@@ -1011,6 +1274,8 @@
       VI.autostart = v.autostart !== false;
       if (typeof v.silence_ms === 'number') VI.silenceMs = v.silence_ms;
       if (typeof v.min_speech_ms === 'number') VI.minSpeechMs = v.min_speech_ms;
+      if (typeof v.silence_ms_game === 'number') VI.silenceMsGame = v.silence_ms_game;
+      if (typeof v.min_speech_ms_game === 'number') VI.minSpeechMsGame = v.min_speech_ms_game;
       if (typeof v.max_utterance_ms === 'number') VI.maxUtteranceMs = v.max_utterance_ms;
       if (typeof v.onset_mult === 'number') VI.onsetMult = v.onset_mult;
       if (typeof v.abs_min_rms === 'number') VI.absMinRms = v.abs_min_rms;
@@ -1018,6 +1283,10 @@
       if (typeof v.echo_cancellation === 'boolean') VI.echoCancellation = v.echo_cancellation;
       if (typeof v.noise_suppression === 'boolean') VI.noiseSuppression = v.noise_suppression;
       if (typeof v.auto_gain === 'boolean') VI.autoGain = v.auto_gain;
+      if (typeof v.barge_in === 'boolean') VI.bargeIn = v.barge_in;
+      if (typeof v.barge_in_mult === 'number') VI.bargeInMult = v.barge_in_mult;
+      if (typeof v.barge_in_min_ms === 'number') VI.bargeInMinMs = v.barge_in_min_ms;
+      if (typeof v.hold_during_speech === 'boolean') VI.holdDuringSpeech = v.hold_during_speech;
     } catch (e) {
       console.warn('VI: config alınamadı, varsayılanlar kullanılıyor', e);
     }
@@ -1073,9 +1342,19 @@
   let drvLastActivityAt = Date.now();
   let drvAttractOn = false;
   let drvCountdownId = null;
+  let drvEndSeq = 0;      // oyun-sonu→göz geçişi bekleme jetonu (yeni etkileşim iptal eder)
   const DRV_ATTRACT_AFTER_MS = 60000;
-  const DRV_RESET_PROMPT_AFTER_MS = 30000;
-  const DRV_RESET_COUNTDOWN_S = 10;
+  // OYUN AKTİFKEN (menü hariç) 60 sn'lik boşta sıfırlama DEVRE DIŞI: oyun
+  // ortasında "ziyaretçi gitti" kararını boşta sayacı DEĞİL oyun kuralı verir
+  // (art arda 2 soru cevapsız zaman aşımı → backend terk_edildi ile kapatır).
+  // Bu süre o kuralın hiç işleyemeyeceği durumlara (örn. "başla" bekleyen hazır
+  // ekranında hiç ses gelmemesi) karşı mutlak sessizlik SİGORTASIDIR.
+  const DRV_GAME_IDLE_FUSE_MS = 300000;
+  // Attract'a girerken oturum ZATEN sifirlanir (asagida) — ziyaretcinin
+  // kaybedecegi bir sey kalmadigindan "Hala orada misin?" uyarisi kaldirildi.
+  // Bu sure artik yalnizca sessiz reload'un (bellek sizintisi sigortasi)
+  // gecikmesidir; sik reload attract davet metnini gereksiz yere kapatir.
+  const DRV_RESET_PROMPT_AFTER_MS = 300000;
   // Test modu: oyun bitince bitiş mesajı okunup gösterilsin, sonra göz moduna dön.
   const DRV_TEST_END_LINGER_MS = 4000;
 
@@ -1095,6 +1374,7 @@
     drvLastActivityAt = Date.now();
     if (drvCountdownId) { clearInterval(drvCountdownId); drvCountdownId = null; }
     drvAttractOn = false;
+    drvEndSeq++;   // bekleyen oyun-sonu→göz geçişi varsa iptal: yeni etkileşim başladı
   }
 
   function drvIsGameTrigger(text) {
@@ -1198,16 +1478,48 @@
       // Yalnız kelime modunda AI turu otomatik istenir (panel ile aynı; await yok).
       if (p.game === 'kelime' && !p.ended && p.turn === 'ai') drvAiTurn();
     }
+    let endedToEyes = false;
     if (p.ended && !isTimed) {
+      // Çıkış/terk_edildi: veda repliği okunsun, test modunda sonra göz moduna dön.
       drvGamePhase = null;
       drvSend({ type: 'game_exit' });
+      endedToEyes = testModeOn;
     } else if (p.ended && testModeOn) {
       // Test modu: süreli oyun (quiz) bitti — bitiş mesajı okunsun, sonra göz moduna dön.
       // drvGamePhase hemen boşalır ki bu sırada gelen ses en başa (selam+menü) gitsin.
       drvGamePhase = null;
       setTimeout(() => { if (!drvGamePhase) drvSend({ type: 'game_exit' }); }, DRV_TEST_END_LINGER_MS);
+      endedToEyes = true;
     }
     await rep;
+    // await ETME: drvHandleText'in busy kilidi açık kalsın istemiyoruz — geçiş
+    // kendi içinde bitiş sesinin bitmesini bekler, yeni etkileşim onu iptal eder.
+    if (endedToEyes) drvEndToAttract();
+  }
+
+  // Test modunda oyun bitince (normal bitiş VEYA terk_edildi): bitiş mesajı sesli
+  // okunup skor kısa süre ekranda kalsın, ardından 60 sn boşta sayacını BEKLEMEDEN
+  // doğrudan gözlü bekleme (attract) ekranına geç. Oturum burada temizlenir;
+  // sonraki ses anlık selam yoluyla YENİ ziyaretçi akışını (selam + menü) başlatır.
+  async function drvEndToAttract() {
+    const seq = drvEndSeq;
+    const deadline = Date.now() + 60000;             // güvenlik tavanı
+    let quiet = 0;   // ~900 ms kesintisiz sessizlik iste: TTS parça araları yanıltmasın
+    while (Date.now() < deadline && quiet < 3) {     // bitiş replikleri bitsin
+      await sleep(300);
+      quiet = (stSpeaking || stThinking || stTyping || drvBusyActive()) ? 0 : quiet + 1;
+    }
+    await sleep(DRV_TEST_END_LINGER_MS);             // skor/veda okuma payı
+    // Bu arada yeni etkileşim başladıysa ya da durum değiştiyse sessizce vazgeç.
+    if (seq !== drvEndSeq || drvGamePhase || drvBusyActive() || drvAttractOn
+        || !testModeOn || panelAlive()) return;
+    drvAttractOn = true;
+    drvOptions = [];
+    drvStopTimer(false);
+    drvSend({ type: 'session_reset' });
+    drvFetchJson('/api/session/new', { reason: 'end_to_eyes' }).catch(() => {});  // backend: geçmiş + oyun temiz
+    drvSend({ type: 'attract_on' });
+    drvLastActivityAt = Date.now();
   }
 
   async function drvStartGame(triggerText) {
@@ -1271,7 +1583,7 @@
     if (text) drvSend({ type: 'user_text', text: text });
     drvSend({ type: 'thinking', on: true });
     try {
-      const data = await drvFetchJson('/api/session/new');
+      const data = await drvFetchJson('/api/session/new', { reason: 'greet' });
       if (data.error) { drvSend({ type: 'thinking', on: false }); return; }
       if (data.phase === 'menu') {
         // Test modu: selamlama + oyun menüsü tek payload olarak gelir.
@@ -1342,16 +1654,8 @@
 
   // ——— Boşta/attract OTORİTESİ (panelsiz modda; control.js portu) ———
   // Süreli tur, aktif işleme veya süren konuşma kaydı boşta sayılmaz.
-  function drvStartCountdown() {
-    if (drvCountdownId) return;
-    let left = DRV_RESET_COUNTDOWN_S;
-    drvSend({ type: 'attract_countdown', seconds: left });
-    drvCountdownId = setInterval(() => {
-      left--;
-      if (left <= 0) { drvIdleReset(); return; }
-      drvSend({ type: 'attract_countdown', seconds: left });
-    }, 1000);
-  }
+  // NOT: attract girişi oturumu aninda sıfırlar; görünür geri sayım yok
+  // (attract_countdown mesajı panel/control.js yolunda hâlâ kullanılır).
   async function drvIdleReset() {
     if (drvCountdownId) { clearInterval(drvCountdownId); drvCountdownId = null; }
     drvAttractOn = false;
@@ -1359,20 +1663,42 @@
     drvGamePhase = null;
     drvStopTimer(false);
     // Önce backend oturumu tazele, SONRA sayfayı yenile (istek yarım kalmasın).
-    try { await drvFetchJson('/api/session/new'); } catch (_) {}
+    try { await drvFetchJson('/api/session/new', { reason: 'idle_reset' }); } catch (_) {}
     drvSend({ type: 'session_reset', reload: true });
   }
   setInterval(() => {
     if (panelAlive()) { drvLastActivityAt = Date.now(); return; }  // otorite panelde
+    // BOŞTA sayılmayan durumlar: süren konuşma kaydı, soru zamanlayıcısı, aktif
+    // işleme, AI KONUŞMASI/DÜŞÜNMESİ/YAZMASI ve süren transkripsiyon. Sayaç
+    // yalnızca GERÇEK sessizlikte (ne ziyaretçiden ses ne AI'dan etkinlik) işler.
     const recording = !!(viRec && viRec.state === 'recording' && viHadSpeech);
-    if (recording || drvTimer.id || drvBusyActive()) { drvLastActivityAt = Date.now(); return; }
+    if (recording || drvTimer.id || drvBusyActive()
+        || stSpeaking || stThinking || stTyping || viBusyTranscribe) {
+      drvLastActivityAt = Date.now(); return;
+    }
     if (drvCountdownId) return;   // geri sayım kendi zamanlayıcısında
+    // OYUN AKTİFKEN (kurallar/hazır/soru — menü hariç) boşta sıfırlama 60 sn'de
+    // DEĞİL, yalnızca 5 dk'lık mutlak sessizlik sigortasında devreye girer.
+    // Oyun ortasında ayrılma tespiti oyun kuralının işi: art arda 2 soru cevapsız
+    // zaman aşımına uğrarsa backend oyunu kapatır, bitiş akışı göz moduna döner.
+    const drvInGame = !!(drvGamePhase && drvGamePhase !== 'menu');
+    const attractAfterMs = drvInGame ? DRV_GAME_IDLE_FUSE_MS : DRV_ATTRACT_AFTER_MS;
     const idleMs = Date.now() - drvLastActivityAt;
-    if (!drvAttractOn && idleMs >= DRV_ATTRACT_AFTER_MS) {
+    if (!drvAttractOn && idleMs >= attractAfterMs) {
       drvAttractOn = true;
+      // Ziyaretci GITTI say: mesaj balonlarini/HUD'u temizle, oyun ve sohbet
+      // durumunu sifirla — sonraki ses YENI ziyaretci gibi en bastan (selam +
+      // menu) karsilanir. session_reset ayrica calan sesi de durdurur.
+      drvGamePhase = null;
+      drvOptions = [];
+      drvStopTimer(false);
+      drvSend({ type: 'session_reset' });
+      drvFetchJson('/api/session/new', { reason: 'attract' }).catch(() => {});  // backend: gecmis + oyun temiz
       drvSend({ type: 'attract_on' });
     } else if (drvAttractOn && idleMs >= DRV_ATTRACT_AFTER_MS + DRV_RESET_PROMPT_AFTER_MS) {
-      drvStartCountdown();
+      // Oturum attract girisinde temizlendi; bu nokta yalnizca bellek
+      // sigortasidir — geri sayim gostermeden sessizce yenile.
+      drvIdleReset();
     }
   }, 1000);
 
@@ -1385,8 +1711,13 @@
       return;
     }
     bc.onmessage = (e) => {
-      lastPanelMsgAt = Date.now();   // gelen her mesaj panelden — canlılık takibi
-      handleMessage(e.data || {});
+      const d = e.data || {};
+      // Panel canlılığı yalnız PANELİN gönderdiği mesajlarla ölçülür (panel 2 sn'de
+      // bir 'ping' atar + gerçek kontrol mesajları). 'display_ready' bir SERGİ
+      // EKRANI mesajıdır: açık unutulmuş ikinci bir sergi sekmesi panel sanılırsa
+      // bu ekran otoriteyi ona devreder, ses girdisi boşluğa düşer (sağır kiosk).
+      if (d.type !== 'display_ready') lastPanelMsgAt = Date.now();
+      handleMessage(d);
     };
     bc.postMessage({ type: 'display_ready', mode: panel ? panel.mode : 'desen' });
     setInterval(() => bc.postMessage({
@@ -1537,6 +1868,9 @@
     if (e.key === 'd' || e.key === 'D') {
       viToggle();   // sürekli sesli giriş (dinleme) aç/kapa
     }
+    if (e.key === 'm' || e.key === 'M') {
+      viDebugToggle();   // mikrofon seviye göstergesi (canlı RMS/eşik)
+    }
     if (e.key === 'g' || e.key === 'G') {
       toggleTestModeFromDisplay();   // test modu: 2 oyun + sohbet kapalı
     }
@@ -1587,12 +1921,27 @@
     window.addEventListener('keydown', primeAudio, { once: true });
     // Surekli sesli giris: sayfa acilir ACILMAZ dene — kiosk tarayicisi
     // (--use-fake-ui-for-media-stream) izni otomatik verir, normal tarayicida da
-    // izin daha once "her zaman" verildiyse jest gerekmez. Reddedilir/soru
-    // cikarsa ilk ETKILESIM (dokunma/tus) yedegi devreye girer. 'd' ile ac/kapa.
+    // izin daha once "her zaman" verildiyse jest gerekmez. ILK denemede izin/
+    // AudioContext/cihaz nedeniyle acilamazsa SESSIZCE PES ETMEZ: her etkilesimde
+    // ve periyodik olarak acilana kadar tekrar dener (bu arada gorunur uyari
+    // gosterir). 'd' ile elle ac/kapa (viWantOn ile döngü niyeti korunur).
     if (VI.enabled && VI.autostart) {
-      const startVI = () => viEnable();
-      window.addEventListener('pointerdown', startVI, { once: true });
-      window.addEventListener('keydown', startVI, { once: true });
+      viWantOn = true;
+      const tryStartVI = () => { if (viWantOn && !viActive) viEnable(); };
+      // Her dokunma/tus denemeyi tetikler (once DEGIL: ilk denemeler basarisiz
+      // olsa da sonraki etkilesimler yeniden dener). Basarili olunca no-op.
+      window.addEventListener('pointerdown', tryStartVI);
+      window.addEventListener('keydown', tryStartVI);
+      // Sekme öne gelince (arka plandayken askıya alınan) mikrofonu/AudioContext'i
+      // hemen canlandır — test sırasında sergi sekmesi arkadaysa öne alınca düzelir.
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState !== 'visible') return;
+        if (viCtx && viCtx.state === 'suspended') viCtx.resume().catch(() => {});
+        tryStartVI();
+      });
+      // Etkilesim olmasa bile (kiosk: kimse dokunmuyor) izin sonradan verilir
+      // ya da cihaz serbest kalirsa kendiliginden yakalar.
+      setInterval(tryStartVI, 3000);
       viEnable();
     }
 
