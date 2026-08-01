@@ -29,6 +29,7 @@
     winFlash: $('#win-flash'),
     wordTimer: $('#word-timer'),
     gameOptions: $('#game-options'),
+    sttWait: $('#stt-wait'),
     aiThinking: $('#ai-thinking'),
     stateBadge: $('#state-badge'),
     attractBox: $('#attract'),
@@ -52,9 +53,11 @@
   let stThinking = false;
   let stTyping = false;
   let stSpeaking = false;
+  let stTranscribing = false;   // STT sürüyor — "bekle" balonu görünür, rozet gizli
   function updateStateBadge() {
     const b = els.stateBadge;
     if (!b) return;
+    if (stTranscribing) { b.classList.add('hidden'); return; }  // bekle balonu konuşuyor
     let label = null;
     if (stListening) label = 'Dinliyorum…';
     else if (stThinking) label = 'Düşünüyorum…';
@@ -64,6 +67,25 @@
     const span = b.querySelector('.sb-label');
     if (span) span.textContent = label;
     b.classList.remove('hidden');
+  }
+
+  // STT "bekle" balonu: söz alındı, Whisper yazıya çeviriyor. Ziyaretçi bu
+  // sırada tekrar konuşup sistemi karıştırmasın diye görünür uyarı.
+  // Kısa bekletme replikleri — her açılışta rastgele biri seçilir.
+  const STT_WAIT_TEXTS = ['Bir saniye…', 'Bekle…', 'Anlaşılıyor…', 'Seni duydum…'];
+  function setSttWait(on) {
+    stTranscribing = !!on;
+    if (els.sttWait) {
+      if (stTranscribing) {
+        const label = els.sttWait.querySelector('.go-label');
+        if (label) {
+          label.textContent =
+            STT_WAIT_TEXTS[Math.floor(Math.random() * STT_WAIT_TEXTS.length)];
+        }
+      }
+      els.sttWait.classList.toggle('hidden', !stTranscribing);
+    }
+    updateStateBadge();
   }
 
   // Otonom "canlı göz" idle — etkileşim olmadan X sn geçince devreye girer.
@@ -669,13 +691,13 @@
     const box = els.gameOptions;
     if (!box) return;
     const buttons = Array.isArray(payload && payload.buttons) ? payload.buttons : [];
+    const hint = (payload && payload.hint) ? String(payload.hint) : '';
+    const total = buttons.length + (hint ? 1 : 0);
     box.innerHTML = '';
-    box.classList.remove('count-2', 'count-3', 'count-4', 'count-5');
-    if (!payload || !payload.visible || buttons.length === 0) {
+    if (!payload || !payload.visible || total === 0) {
       box.classList.add('hidden');
       return;
     }
-    box.classList.add('count-' + Math.min(Math.max(buttons.length, 2), 5));
     buttons.forEach((button, index) => {
       const row = document.createElement('div');
       row.className = 'game-option';
@@ -697,6 +719,21 @@
       row.appendChild(label);
       box.appendChild(row);
     });
+    if (hint) {
+      // Sesli yonlendirme balonu: secenek degil, "ne soyleyecegini" gosterir.
+      const row = document.createElement('div');
+      row.className = 'game-option hint';
+      row.style.animationDelay = Math.min(buttons.length * 45, 180) + 'ms';
+      const key = document.createElement('span');
+      key.className = 'go-key';
+      key.textContent = '🎤';
+      const label = document.createElement('span');
+      label.className = 'go-label';
+      label.textContent = hint;
+      row.appendChild(key);
+      row.appendChild(label);
+      box.appendChild(row);
+    }
     box.classList.remove('hidden');
     noteInteraction();
   }
@@ -708,6 +745,7 @@
     const text = normChoice((payload && (payload.text || payload.label)) || key);
     let selected = null;
     for (const row of box.querySelectorAll('.game-option')) {
+      if (row.classList.contains('hint')) continue;   // yonlendirme balonu secilemez
       row.classList.remove('selected', 'pulse');
       const rowKey = row.dataset.key || '';
       const rowChoice = row.dataset.choice || '';
@@ -964,6 +1002,10 @@
   }
 
   async function viTranscribeAndSend(blob, trimMs, overlapTts) {
+    // Oyun-sonu→göz geçişi beklenirken duyulan ses (bitiş TTS'inin yankısı,
+    // oda gürültüsü, geçiş sırasındaki söz) İŞLENMEZ: gözler her zaman görünür,
+    // selam ancak gözler açıldıktan sonraki YENİ sesle başlar.
+    if (drvEndPending) return;
     // SES GİRDİSİ = ETKİNLİK: transkript boş dönse bile ("Duyamadım") ziyaretçi
     // KONUŞUYORDUR — boşta sayacı sıfırlanır. Aksi halde tanınmayan denemeler
     // birikip oyun ORTASINDA attract/sıfırlamayı tetikliyordu.
@@ -975,6 +1017,7 @@
       return;
     }
     viBusyTranscribe = true;   // viHoldUntil zaten viStopRecorder('send')'de ayarlandı
+    setSttWait(true);          // "bekle — yazıya çeviriyorum" balonu (tekrar konuşmasın)
     const t0 = performance.now();
     try {
       const fd = new FormData();
@@ -1006,8 +1049,12 @@
         + ' | model ' + (m.stt_ms || 0) + ' ms | ses ' + (m.duration_s || 0).toFixed(1) + ' sn'
         + (m.trim_ms ? ' | trim ' + m.trim_ms + ' ms' : '')
         + (txt ? '' : ' | SONUÇ BOŞ (' + ((data && data.warning) || '?') + ')'));
-      if (txt) {
-        if (bc && panelAlive()) {
+      if (txt && !drvEndPending) {   // geçiş penceresinde biten STT de atılır
+        // Oyunu EKRAN-İÇİ sürücü yürütüyorsa (drvGamePhase dolu) cevap panele
+        // GİTMEZ: arka plandaki panel sekmesi Chrome kısıtlamasıyla dakikada bir
+        // uyanır — cevap orada bekletilirken sayaç "süre doldu" der (kum saati +
+        // kilitlenme şikâyeti). Panel yalnız oyunu KENDİSİ sürüyorsa girdi alır.
+        if (bc && panelAlive() && !drvGamePhase) {
           bc.postMessage({ type: 'voice_input', text: txt });  // panel açık: oradan işlenir
         } else {
           drvHandleText(txt);   // panelsiz sergi: ekran-içi sürücü işler
@@ -1024,7 +1071,9 @@
       viBusyTranscribe = false;
       if (viPendingBlob) {       // sırada bekleyen söz varsa hemen işle
         const p = viPendingBlob; viPendingBlob = null;
-        viTranscribeAndSend(p.blob, p.trimMs, p.overlapTts);
+        viTranscribeAndSend(p.blob, p.trimMs, p.overlapTts);   // balon açık kalır
+      } else {
+        setSttWait(false);
       }
     }
   }
@@ -1160,7 +1209,8 @@
     // içerik zaten kullanılmazdı (boşta her söz selama gider). Selam sonrası
     // phase='menu' olduğundan bu koşul (!drvGamePhase) tekrar sağlanmaz.
     if (viHadSpeech && (now - viSpeechStartAt) >= VI.minSpeechMs
-        && testModeOn && !panelAlive() && !drvGamePhase && !drvBusyActive()) {
+        && testModeOn && !panelAlive() && !drvGamePhase && !drvBusyActive()
+        && !drvEndPending) {   // oyun-sonu→göz geçişi beklerken selam tetiklenmez
       viStopRecorder('discard');
       drvInstantGreet();
       return;
@@ -1344,6 +1394,11 @@
   let drvAttractOn = false;
   let drvCountdownId = null;
   let drvEndSeq = 0;      // oyun-sonu→göz geçişi bekleme jetonu (yeni etkileşim iptal eder)
+  // Oyun-sonu→göz geçişi BEKLERKEN ses girdisi işlenmez: bitiş mesajının
+  // yankısı ya da oda gürültüsü anlık selamı tetikleyip göz ekranını atlatmasın
+  // (kural: gözler HER ZAMAN görünür; selam ancak gözler açıldıktan SONRA
+  // duyulan sesle başlar). Bayrak drvEndToAttract'ın finally'sinde temizlenir.
+  let drvEndPending = false;
   const DRV_ATTRACT_AFTER_MS = 60000;
   // OYUN AKTİFKEN (menü hariç) 60 sn'lik boşta sıfırlama DEVRE DIŞI: oyun
   // ortasında "ziyaretçi gitti" kararını boşta sayacı DEĞİL oyun kuralı verir
@@ -1361,14 +1416,25 @@
 
   function drvSend(payload) { return handleMessage(payload || {}); }
 
-  async function drvFetchJson(url, body) {
+  async function drvFetchJson(url, body, timeoutMs) {
     const opts = { method: 'POST' };
     if (body) {
       opts.headers = { 'Content-Type': 'application/json' };
       opts.body = JSON.stringify(body);
     }
-    const r = await fetch(url, opts);
-    return r.json();
+    // Zaman aşımı ŞART: /api/game/input vb. sunucuda takılırsa yanıtsız fetch
+    // thinking'i (mikrofon sert kapalı + bekle jesti) 45 sn güvenlik sayacına
+    // dek açık bırakıyordu → "kum saati geldi, oyun kilitlendi" hissi. İptalde
+    // çağıranın catch'i thinking'i kapatır, drvBusy finally ile açılır.
+    const ctl = new AbortController();
+    const tid = setTimeout(() => ctl.abort(), timeoutMs || 15000);
+    opts.signal = ctl.signal;
+    try {
+      const r = await fetch(url, opts);
+      return await r.json();
+    } finally {
+      clearTimeout(tid);
+    }
   }
 
   function drvNoteActivity() {
@@ -1408,8 +1474,9 @@
     drvOptions = buttons.slice();
     drvSend({
       type: 'game_options',
-      visible: buttons.length > 0,
+      visible: buttons.length > 0 || !!(p && p.hint),
       buttons: buttons,
+      hint: (p && p.hint) || null,   // sesli yonlendirme balonu ("«Başla» de" vb.)
       phase: (p && p.phase) || null,
       game: (p && p.game) || null,
       kind: (p && p.kind) || null,
@@ -1420,6 +1487,7 @@
     drvOptions = opts;
     drvSend({
       type: 'game_options', visible: true, buttons: opts,
+      hint: 'Söylemen yeterli',
       phase: 'idle', game: null, kind: 'home',
     });
   }
@@ -1431,6 +1499,15 @@
     drvSend({ type: 'timer_start', seconds: seconds, who: who });
     drvTimer.id = setInterval(() => {
       if (drvTimer.endsAt - Date.now() > 0) return;
+      // Cevap YOLDAYSA "süre doldu" deme: süre içinde konuşulmuş ama STT/işleme
+      // henüz bitmemiş cevap yanmasın (kilitlenme + haksız soru atlama şikâyeti).
+      // Kapsam: kayıtta söz var / transkripsiyon sürüyor / sırada söz bekliyor /
+      // sürücü işliyor. Tavan 30 sn (STT fetch 25 sn'de zaten iptal olur) —
+      // asılı kalan bir istek sayacı sonsuza dek tutamasın.
+      const answerInFlight = viBusyTranscribe || viPendingBlob
+        || (viRec && viRec.state === 'recording' && viHadSpeech)
+        || drvBusyActive();
+      if (answerInFlight && Date.now() - drvTimer.endsAt < 30000) return;
       const wasUser = (drvTimer.who === 'user');
       drvStopTimer();
       if (wasUser) drvSubmitTimeout();
@@ -1494,40 +1571,68 @@
       endedToEyes = testModeOn;
     } else if (p.ended && testModeOn) {
       // Test modu: süreli oyun (quiz) bitti — bitiş mesajı okunsun, sonra göz moduna dön.
-      // drvGamePhase hemen boşalır ki bu sırada gelen ses en başa (selam+menü) gitsin.
       drvGamePhase = null;
       setTimeout(() => { if (!drvGamePhase) drvSend({ type: 'game_exit' }); }, DRV_TEST_END_LINGER_MS);
       endedToEyes = true;
     }
-    await rep;
-    // await ETME: drvHandleText'in busy kilidi açık kalsın istemiyoruz — geçiş
-    // kendi içinde bitiş sesinin bitmesini bekler, yeni etkileşim onu iptal eder.
-    if (endedToEyes) drvEndToAttract();
+    // Bitiş kararıyla birlikte ses girdisi kapatılır (typewriter/TTS daha
+    // sürerken gelen gürültü bile selamı tetikleyemesin); göz geçişi bayrağı
+    // kendi finally'sinde bırakır.
+    if (endedToEyes) drvEndPending = true;
+    try {
+      await rep;
+    } finally {
+      // await ETME: drvHandleText'in busy kilidi açık kalsın istemiyoruz — geçiş
+      // kendi içinde bitiş sesinin bitmesini bekler, yeni etkileşim onu iptal eder.
+      if (endedToEyes) drvEndToAttract();
+    }
   }
 
   // Test modunda oyun bitince (normal bitiş VEYA terk_edildi): bitiş mesajı sesli
   // okunup skor kısa süre ekranda kalsın, ardından 60 sn boşta sayacını BEKLEMEDEN
   // doğrudan gözlü bekleme (attract) ekranına geç. Oturum burada temizlenir;
   // sonraki ses anlık selam yoluyla YENİ ziyaretçi akışını (selam + menü) başlatır.
+  // İKİ tetik: panelsiz sürücü (drvApplyPayload) VE panel ('end_to_eyes' mesajı).
+  // Zamanlama her iki durumda da BURADA: TTS'in gerçekten ne zaman bittiğini
+  // yalnız sergi sayfası bilir; panel yalnızca "oyun bitti" işaretini yollar.
   async function drvEndToAttract() {
     const seq = drvEndSeq;
-    const deadline = Date.now() + 60000;             // güvenlik tavanı
-    let quiet = 0;   // ~900 ms kesintisiz sessizlik iste: TTS parça araları yanıltmasın
-    while (Date.now() < deadline && quiet < 3) {     // bitiş replikleri bitsin
-      await sleep(300);
-      quiet = (stSpeaking || stThinking || stTyping || drvBusyActive()) ? 0 : quiet + 1;
+    // Pencere boyunca ses girdisi işlenmez (viTranscribeAndSend + anlık selam
+    // drvEndPending'e bakar): gözler görünmeden selam başlamasın.
+    drvEndPending = true;
+    try {
+      const deadline = Date.now() + 60000;           // güvenlik tavanı
+      let quiet = 0;  // ~900 ms kesintisiz sessizlik iste: TTS parça araları yanıltmasın
+      while (Date.now() < deadline && quiet < 3) {   // bitiş replikleri bitsin
+        await sleep(300);
+        // Yeni etkileşim (panel operatörü vb.): hemen bırak ki finally bayrağı
+        // temizlesin ve mikrofon uzun süre sağır kalmasın.
+        if (seq !== drvEndSeq) return;
+        quiet = (stSpeaking || stThinking || stTyping || drvBusyActive()) ? 0 : quiet + 1;
+      }
+      // Skor/veda okuma payı — iptal gelirse dilimler arasında hemen bırak.
+      for (let beklenen = 0; beklenen < DRV_TEST_END_LINGER_MS; beklenen += 300) {
+        await sleep(300);
+        if (seq !== drvEndSeq) return;
+      }
+      // Bu arada yeni etkileşim başladıysa ya da durum değiştiyse sessizce vazgeç.
+      if (seq !== drvEndSeq || drvGamePhase || drvBusyActive() || drvAttractOn
+          || attractActive || !testModeOn) return;
+      // Pencere içinde birikmiş (gürültü/yankı) kayıt varsa at: selamı ancak
+      // gözler açıldıktan SONRA duyulan YENİ bir ses tetikleyebilir.
+      if (viRec && viRec.state === 'recording') viStopRecorder('discard');
+      drvAttractOn = true;
+      drvOptions = [];
+      drvStopTimer(false);
+      drvSend({ type: 'session_reset' });
+      drvFetchJson('/api/session/new', { reason: 'end_to_eyes' }).catch(() => {});  // backend: geçmiş + oyun temiz
+      // Panel açıksa durumunu eşitle (boşta sayacı / oyun fazı geride kalmasın).
+      if (bc && panelAlive()) bc.postMessage({ type: 'attract_sync' });
+      drvSend({ type: 'attract_on' });
+      drvLastActivityAt = Date.now();
+    } finally {
+      drvEndPending = false;
     }
-    await sleep(DRV_TEST_END_LINGER_MS);             // skor/veda okuma payı
-    // Bu arada yeni etkileşim başladıysa ya da durum değiştiyse sessizce vazgeç.
-    if (seq !== drvEndSeq || drvGamePhase || drvBusyActive() || drvAttractOn
-        || !testModeOn || panelAlive()) return;
-    drvAttractOn = true;
-    drvOptions = [];
-    drvStopTimer(false);
-    drvSend({ type: 'session_reset' });
-    drvFetchJson('/api/session/new', { reason: 'end_to_eyes' }).catch(() => {});  // backend: geçmiş + oyun temiz
-    drvSend({ type: 'attract_on' });
-    drvLastActivityAt = Date.now();
   }
 
   async function drvStartGame(triggerText) {
@@ -1674,7 +1779,8 @@
       drvSend({ type: 'game_option_select', key: 'sohbet', text: text });
       drvSend({ type: 'user_text', text: text });
       drvSend({ type: 'thinking', on: true });
-      const data = await drvFetchJson('/api/send', { text: text });
+      // LLM soğuk başlangıçta yavaş olabilir — sohbete geniş tavan (45 sn).
+      const data = await drvFetchJson('/api/send', { text: text }, 45000);
       if (data.error) { drvSend({ type: 'thinking', on: false }); return; }
       await drvSend({
         type: 'ai_reply',
@@ -1741,6 +1847,12 @@
   }, 1000);
 
   // ——— Kontrol paneli ile haberlesme ———————————————————————
+  // Panelden gelen ve "yeni etkileşim başladı" anlamı taşıyan mesaj tipleri:
+  // bekleyen oyun-sonu→göz geçişini (drvEndToAttract) iptal ederler.
+  const PANEL_INTERACTION = new Set([
+    'user_text', 'thinking', 'ai_reply', 'game_option_select',
+    'manual_gesture', 'timer_start',
+  ]);
   function initChannel() {
     try {
       bc = new BroadcastChannel('aibody');
@@ -1755,6 +1867,11 @@
       // EKRANI mesajıdır: açık unutulmuş ikinci bir sergi sekmesi panel sanılırsa
       // bu ekran otoriteyi ona devreder, ses girdisi boşluğa düşer (sağır kiosk).
       if (d.type !== 'display_ready') lastPanelMsgAt = Date.now();
+      // Panelden gelen GERÇEK etkileşim, bekleyen oyun-sonu→göz geçişini iptal
+      // eder (drvNoteActivity yalnız panelsiz yolda çağrılır; panel yolu burada).
+      // 'game_exit'/'game_options' gibi bitiş-temizlik mesajları BİLEREK dışarıda:
+      // panel oyun bitince +4 sn'de game_exit atar, geçişi iptal etmemeli.
+      if (PANEL_INTERACTION.has(d.type)) drvEndSeq++;
       handleMessage(d);
     };
     bc.postMessage({ type: 'display_ready', mode: panel ? panel.mode : 'desen' });
@@ -1840,6 +1957,10 @@
         stListening = (d.on !== false);
         if (stListening) noteInteraction();
         updateStateBadge();
+      } else if (d.type === 'end_to_eyes') {
+        // Panel (test modu): oyun bitti — bitiş mesajı TTS'i bitince göz moduna
+        // geç (bekleme + iptal mantığı drvEndToAttract'ta; panelsiz yolla ortak).
+        drvEndToAttract();
       } else if (d.type === 'attract_on') {
         attractShow();
       } else if (d.type === 'attract_off') {
@@ -1856,6 +1977,8 @@
         startDisplayTimer(d.seconds, d.who);
       } else if (d.type === 'timer_stop') {
         stopDisplayTimer();
+      } else if (d.type === 'stt_wait') {
+        setSttWait(!!d.on);      // panel mikrofonu: STT sürerken "bekle" balonu
       } else if (d.type === 'game_exit') {
         setThinking(false);
         updateGameHud(false, null);

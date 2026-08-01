@@ -211,6 +211,22 @@
           handleVoiceInput(d.text || '');
         } else if (d.type === 'test_mode') {
           applyTestMode(!!d.on, false);   // sergi ekranından 'g' ile değişti
+        } else if (d.type === 'attract_sync') {
+          // Sergi oyun-sonunda göz (attract) moduna geçti; backend oturumunu da
+          // orası sıfırladı. Panel durumu eşitlenir ki boşta sayacı/oyun fazı
+          // geride kalmasın ve sonraki ses yeni ziyaretçi selamına gitsin.
+          cancelResetCountdown();
+          attractOn = true;
+          lastActivityAt = Date.now();
+          gamePhase = null;
+          stopWordTimer();
+          hideGameUI();
+          if (els.prompt) { els.prompt.value = ''; updateCharCount(); }
+          if (els.aiResponse) {
+            els.aiResponse.textContent = 'yanıt bekleniyor';
+            els.aiResponse.classList.add('empty');
+          }
+          log('sys', 'oyun bitti → göz modu (sergi bildirdi, oturum temiz)');
         }
       };
       bc.postMessage({ type: 'ping' });
@@ -352,8 +368,14 @@
   }
 
   // /api/session/new çağrısı — startNewVisitorSession ile ortak yardımcı.
-  async function postNewSession() {
-    const res = await fetch('/api/session/new', { method: 'POST' });
+  // reason session.log'a düşer; nedensiz çağrı "eski_istemci" (hayalet istemci
+  // teşhis işareti) sayıldığından panel her zaman gerçek nedenini bildirir.
+  async function postNewSession(reason) {
+    const res = await fetch('/api/session/new', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason: reason || 'panel' }),
+    });
     return res.json();
   }
 
@@ -372,7 +394,7 @@
     // Sergi ekranı sayfayı yeniler (bellek sızıntısı sigortası; sayfa oturum-tabanlı).
     sendToDisplay({ type: 'session_reset', reload: true });
     try {
-      const data = await postNewSession();
+      const data = await postNewSession('idle_reset');
       if (data && data.error) log('sys', 'yeni oturum hatası: ' + data.error);
       else log('sys', 'yeni ziyaretçi oturumu hazır (otomatik)');
     } catch (e) {
@@ -634,6 +656,7 @@
     const mime = (mediaRecorder && mediaRecorder.mimeType) || 'audio/webm';
     const blob = new Blob(recChunks, { type: mime });
     setMicStatus('çevriliyor... (' + dur.toFixed(1) + ' sn)', 'busy');
+    sendToDisplay({ type: 'stt_wait', on: true });   // sergi: "bekle" balonu
     const fd = new FormData();
     fd.append('audio', blob, 'rec.webm');
     try {
@@ -669,6 +692,8 @@
       log('sys', 'STT' + truncNote + ': ' + txt);
     } catch (e) {
       setMicStatus('ag hatasi: ' + e.message, 'error');
+    } finally {
+      sendToDisplay({ type: 'stt_wait', on: false });
     }
   }
 
@@ -720,7 +745,7 @@
       // 409 ile koruyabilir — eski sıra ekranı silip ⏳ (bekle) jestini basıyor,
       // ret gelince öylece bırakıyordu. 409'da görsel yıkım yok; faz sunucudan
       // geri yüklenir, sonraki girdi oyuna akar.
-      const data = await postNewSession();
+      const data = await postNewSession('greet');
       if (data.error) {
         if (data.phase) gamePhase = (data.phase !== 'idle') ? data.phase : null;
         log('sys', 'yeni oturum reddedildi: ' + data.error
@@ -1095,6 +1120,10 @@
         // gamePhase hemen boşalır ki bu sırada gelen girdi en başa (selam+menü) gitsin.
         stopWordTimer();
         gamePhase = null;
+        // Sergi ekranı bitiş TTS'i bitince göz moduna geçer (zamanlama orada —
+        // sesin ne zaman bittiğini yalnız sergi bilir) ve 'attract_sync' ile
+        // panel durumunu eşitler. Bitiş ekranı 60 sn boşta sayacını beklemez.
+        sendToDisplay({ type: 'end_to_eyes' });
         setTimeout(() => {
           if (!gamePhase) { sendToDisplay({ type: 'game_exit' }); hideGameUI(); }
         }, TEST_END_LINGER_MS);
@@ -1196,8 +1225,9 @@
     displayOptionButtons = buttons.slice();
     sendToDisplay({
       type: 'game_options',
-      visible: buttons.length > 0,
+      visible: buttons.length > 0 || !!p.hint,
       buttons: buttons,
+      hint: p.hint || null,   // sesli yonlendirme balonu ("«Başla» de" vb.)
       phase: p.phase || null,
       game: p.game || null,
       kind: p.kind || null,
@@ -1210,6 +1240,7 @@
       type: 'game_options',
       visible: true,
       buttons: opts,
+      hint: 'Söylemen yeterli',
       phase: 'idle',
       game: null,
       kind: 'home',

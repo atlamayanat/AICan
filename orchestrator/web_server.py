@@ -27,6 +27,7 @@ from flask import Flask, Response, jsonify, request, send_from_directory
 
 from game_engine import GameEngine
 from llm_bridge import LLMBridge
+from sergi_logger import SergiLogger
 from session_logger import SessionLogger
 
 logging.basicConfig(
@@ -666,6 +667,13 @@ def create_app(config: dict) -> Flask:
     log.info("Oturum logu: %s", log_path)
     # Oyun baslangic/bitis ozetleri de ayni oturum loguna yazilsin (gozlem).
     game.session_logger = logger
+    # SERGI ZIYARETCI LOGU: ziyaretci bazli olcum (sure, oyun, skor, anlamsiz
+    # cevap, yarida birakma). Ziyaretci yasam dongusu yalniz sergi/test modunda
+    # baslatilir (session/new greet); panel/gelistirme kullanimi kayit uretmez.
+    sergi_dir = (BASE_DIR / config.get("sergi_log_dir", "../logs/sergi")).resolve()
+    sergi = SergiLogger(sergi_dir)
+    game.sergi_logger = sergi
+    log.info("Sergi ziyaretci logu: %s", sergi_dir)
 
     # Tek seferlik warmup arka planda
     if config.get("warmup_on_start", True):
@@ -840,6 +848,7 @@ def create_app(config: dict) -> Flask:
             # Test gunu: sohbet kapali — LLM'e gitmeden nazik oyun yonlendirmesi.
             # (Frontend zaten oyuna yonlendirir; bu backend guvencesidir.)
             logger.log_event("Test modu: sohbet istegi oyuna yonlendirildi")
+            sergi.sohbet()
             return jsonify({
                 "yanit": TEST_SOHBET_KAPALI_TEXT,
                 "jest_id": SESSION_GREETING_JEST,
@@ -896,6 +905,15 @@ def create_app(config: dict) -> Flask:
                 logger.log_event(
                     f"session/new REDDEDILDI: aktif oyun korundu (neden={reason})")
                 return jsonify({"error": "game_active", "phase": game.phase}), 409
+        # Sergi ziyaretci logu: "ziyaretci gitti" nedenleri acik kaydi kapatir;
+        # greet yeni ziyaretci acar (yalniz sergi/test modunda — panel kullanimi
+        # ziyaretci sayilmaz). visitor_start acik kaydi zaten guvenle kapatir.
+        if reason in ("attract", "idle_reset", "end_to_eyes"):
+            sergi.visitor_end(reason)
+        elif test_mode["on"]:
+            sergi.visitor_start(reason)
+        else:
+            sergi.visitor_end(reason)   # test modu kapaliyken acik kayit birakma
         bridge.clear_history()
         if test_mode["on"]:
             # Test gunu: "merhaba" -> selamla + dogrudan oyun secimi (sohbet yok).
@@ -933,6 +951,9 @@ def create_app(config: dict) -> Flask:
         on = payload.get("on")
         on = (not test_mode["on"]) if on is None else bool(on)
         test_mode["on"] = on
+        if not on:
+            # Sergi modu kapandi: acik ziyaretci kaydi kaybolmasin.
+            sergi.visitor_end("test_mode_kapandi")
         with game_lock:
             game.izinli_oyunlar = TEST_OYUNLAR if on else None
             game.voice_only = on
@@ -992,6 +1013,8 @@ def create_app(config: dict) -> Flask:
         with game_lock:
             result = game.handle(text, timeout=timeout, button=button)
         game_last_input["t"] = time.time()
+        if text and not timeout:
+            sergi.aktivite()   # gercek girdi (buton dahil) aktif sureyi tazeler
         if result.get("kind") == "round":
             logger.log_event(
                 f"Oyun turu: kullanici={result.get('user_move')} ai={result.get('ai_move')} "
@@ -1185,6 +1208,10 @@ def create_app(config: dict) -> Flask:
                  (f" | trim {trimmed_ms} ms" if trimmed_ms else ""),
                  (" | kurtarma turu" if retried else ""),
                  getattr(info, "duration", 0.0), ctx or "sohbet")
+        # Sergi ziyaretci logu: bos sonuc = "duyamadim" (anlamsiz cevap sayilir),
+        # yanki = TTS'in kendi sesi. Ziyaretci acik degilse sessizce yok sayilir.
+        sergi.stt(bos=not text, yanki=is_echo, kurtarma=retried,
+                  stt_ms=stt_ms, ses_sn=getattr(info, "duration", 0.0))
 
         # Teshis kaydi (whisper_debug_save_audio): gercek ortamdan ornek toplayip
         # model/ayar adaylarini ayni set uzerinde kiyaslamak icin.
@@ -1288,6 +1315,7 @@ def create_app(config: dict) -> Flask:
         return resp
 
     app.config["_logger"] = logger
+    app.config["_sergi"] = sergi
     return app
 
 
@@ -1341,7 +1369,8 @@ def _find_kiosk_browser():
 
 
 def open_browsers(host: str, port: int, delay_sec: float = 1.2,
-                  open_control: bool = True, kiosk: bool = True) -> None:
+                  open_control: bool = True, kiosk: bool = True,
+                  fullscreen: bool = True) -> None:
     """Sunucu kalktiktan sonra sekmeleri ac.
 
     open_control=False (sergi profili: web_open_control=false): YALNIZ sergi
@@ -1352,6 +1381,10 @@ def open_browsers(host: str, port: int, delay_sec: float = 1.2,
     acilir — mikrofon izni OTOMATIK verilir (soru cikmaz) ve ses/TTS ilk dokunusu
     beklemez. Bayraklar ancak YENI tarayici surecinde islediginden ayri
     --user-data-dir sart (acik Chrome'a sekme eklense bayraklar yok sayilirdi).
+
+    fullscreen=True (web_fullscreen): pencere dogrudan TAM EKRAN acilir
+    (--start-fullscreen; F11 ile cikilabilir — kilitli --kiosk modu DEGIL,
+    operator gerekirse cikabilsin). Yalniz kiosk tarayici yolunda gecerli.
     """
     def _open():
         import time
@@ -1378,7 +1411,7 @@ def open_browsers(host: str, port: int, delay_sec: float = 1.2,
                         # isareti kullaniyorsunuz" sari uyari cubugunu bastirir.
                         # Mikrofon otomatik izni aynen calisir.
                         "--test-type",
-                    ] + urls)
+                    ] + (["--start-fullscreen"] if fullscreen else []) + urls)
                     return
                 except Exception as e:  # noqa: BLE001
                     log.warning("Sergi tarayicisi acilamadi (%s) — varsayilana dusuluyor", e)
@@ -1419,17 +1452,26 @@ def main() -> None:
     app = create_app(config)
     open_control = bool(config.get("web_open_control", True))
     kiosk = bool(config.get("web_kiosk_browser", True))
+    fullscreen = bool(config.get("web_fullscreen", True))
     log.info("AI Body web sunucusu: http://%s:%d", host, port)
-    log.info("  Sergi:          http://%s:%d/", host, port)
+    log.info("  Sergi:          http://%s:%d/%s", host, port,
+             " (tam ekran)" if fullscreen else "")
     if open_control:
         log.info("  Kontrol paneli: http://%s:%d/control", host, port)
     else:
         log.info("  Kontrol paneli: ACILMAYACAK (web_open_control=false — sergi modu)")
-    open_browsers(host, port, open_control=open_control, kiosk=kiosk)
+    open_browsers(host, port, open_control=open_control, kiosk=kiosk,
+                  fullscreen=fullscreen)
     try:
         # use_reloader=False -> warmup ve iki sekme acmayi tek seferde calistirir
         app.run(host=host, port=port, debug=False, use_reloader=False, threaded=True)
     finally:
+        sergi = app.config.get("_sergi")
+        if sergi:
+            try:
+                sergi.close()   # acik ziyaretci kaydi kaybolmasin
+            except Exception as e:
+                log.warning("Sergi logu kapanis hatasi: %s", e)
         logger = app.config.get("_logger")
         if logger:
             try:

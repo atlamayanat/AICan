@@ -6,6 +6,7 @@
   "system_prompt_path": "../ai/system_prompt.txt",
   "gestures_path": "../ai/gestures.json",
   "session_log_path": "../logs/session.log",
+  "sergi_log_dir": "../logs/sergi",
   "request_timeout_sec": 45,
   "history_max_turns": 5,
   "keep_alive": -1,

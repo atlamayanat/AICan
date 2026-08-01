@@ -5,6 +5,7 @@
   "system_prompt_path": "../ai/system_prompt.txt",
   "gestures_path": "../ai/gestures.json",
   "session_log_path": "../logs/session.log",
+  "sergi_log_dir": "../logs/sergi",
   "request_timeout_sec": 45,
   "history_max_turns": 3,
   "keep_alive": -1,
@@ -64,6 +65,7 @@
   "voice_input_barge_in_min_ms": 280,
   "voice_input_hold_during_speech": true,
   "web_kiosk_browser": true,
-  "web_open_control": true,
+  "web_open_control": false,
+  "web_fullscreen": true,
   "test_mode": true
 }
