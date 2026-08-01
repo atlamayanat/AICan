@@ -714,25 +714,28 @@
     els.prompt.value = '';
     updateCharCount();
     if (els.sendBtn) els.sendBtn.disabled = true;
-    if (els.statThink) els.statThink.textContent = '0.00 sn';
-    if (els.statTokens) els.statTokens.textContent = '0 → 0';
-    if (els.statRate) els.statRate.textContent = '— tok/s';
-    if (els.statLoad) els.statLoad.textContent = '0.0 sn';
-
-    gamePhase = null;
-    stopWordTimer();
-    hideGameUI();
-    sendToDisplay({ type: 'session_reset' });
-    sendToDisplay({ type: 'user_text', text });
-    sendThinking(true);
 
     try {
+      // ÖNCE sunucuya sor, SONRA ekranı sıfırla: /api/session/new aktif oyunu
+      // 409 ile koruyabilir — eski sıra ekranı silip ⏳ (bekle) jestini basıyor,
+      // ret gelince öylece bırakıyordu. 409'da görsel yıkım yok; faz sunucudan
+      // geri yüklenir, sonraki girdi oyuna akar.
       const data = await postNewSession();
       if (data.error) {
-        sendThinking(false);
-        log('sys', 'yeni oturum hatası: ' + data.error);
+        if (data.phase) gamePhase = (data.phase !== 'idle') ? data.phase : null;
+        log('sys', 'yeni oturum reddedildi: ' + data.error
+          + (data.phase ? ' (faz: ' + data.phase + ')' : ''));
         return;
       }
+      if (els.statThink) els.statThink.textContent = '0.00 sn';
+      if (els.statTokens) els.statTokens.textContent = '0 → 0';
+      if (els.statRate) els.statRate.textContent = '— tok/s';
+      if (els.statLoad) els.statLoad.textContent = '0.0 sn';
+      gamePhase = null;
+      stopWordTimer();
+      hideGameUI();
+      sendToDisplay({ type: 'session_reset' });
+      sendToDisplay({ type: 'user_text', text });
       if (data.phase === 'menu') {
         // Test modu: selamlama + oyun menüsü tek payload olarak gelir.
         log('sys', 'yeni ziyaretçi oturumu (test modu: selamlama + oyun menüsü)');
@@ -756,7 +759,6 @@
         els.aiResponse.classList.remove('empty');
       }
     } catch (e) {
-      sendThinking(false);
       log('sys', 'yeni oturum ağ hatası: ' + e.message);
     } finally {
       if (els.sendBtn) els.sendBtn.disabled = false;
@@ -789,20 +791,32 @@
       return;
     }
 
-    // Yeni ziyaretçi selamı, aktif oyun dahil her şeyden önce temiz başlangıç açar.
+    // ——— Oyun modu yönlendirmesi ———
+    // OYUN AKTİFKEN her girdi (selam dahil) OYUNA gider. Selamın "temiz
+    // başlangıç" açması yalnız boşta geçerli: oyun ortasında duyulan "merhaba"
+    // (ikinci çocuk / STT gürültüsü) aktif yarışmayı bırakıp greet'e gidiyor,
+    // backend 409 ile koruyunca panel fazı kaybediyordu (kum saati döngüsü).
+    if (gamePhase) {
+      log('user', '> ' + text);
+      els.prompt.value = '';
+      updateCharCount();
+      await submitGameInput(text, null);
+      els.prompt.focus();
+      return;
+    }
+
+    // Yeni ziyaretçi selamı (yalnız boşta): temiz başlangıç açar.
     if (isNewSessionGreeting(text)) {
       await startNewVisitorSession(text);
       return;
     }
 
-    // ——— Oyun modu yönlendirmesi ———
-    // Aktif oyun varsa girdi oyuna gider; "OYUN OYNAYALIM" hazır komutu oyunu başlatır.
-    if (gamePhase || isGameTrigger(text)) {
+    // "OYUN OYNAYALIM" hazır komutu oyunu başlatır.
+    if (isGameTrigger(text)) {
       log('user', '> ' + text);
       els.prompt.value = '';
       updateCharCount();
-      if (gamePhase) await submitGameInput(text, null);
-      else await startGame(text);
+      await startGame(text);
       els.prompt.focus();
       return;
     }
@@ -908,6 +922,7 @@
   // Oyun mantığı backend'de (game_engine.py). Burası ince yönlendirici:
   // hazır komutu yakalar, /api/game/* çağırır, sergiye yansıtır, dokunmatik buton render eder.
   let gamePhase = null; // null | 'menu' | 'rps'
+  let sentUserText = ''; // sergi balonuna son yazılan kullanıcı girdisi (fuzzy düzeltme kıyası)
 
   function normalizeTr(s) {
     s = (s || '')
@@ -934,7 +949,16 @@
     log('sys', 'oyun modu başlatılıyor');
     try {
       const r = await fetch('/api/game/start', { method: 'POST' });
-      await applyGamePayload(await r.json());
+      const data = await r.json();
+      if (data.error) {
+        // 409 game_active: backend ortadaki oyunu korudu — fazı geri yükle.
+        if (data.phase) gamePhase = (data.phase !== 'idle') ? data.phase : null;
+        sendThinking(false);
+        log('sys', 'oyun başlatılamadı: ' + data.error
+          + (data.phase ? ' (faz: ' + data.phase + ')' : ''));
+        return;
+      }
+      await applyGamePayload(data);
     } catch (e) {
       sendThinking(false);
       log('sys', 'oyun başlatılamadı: ' + e.message);
@@ -956,7 +980,8 @@
   async function submitGameInput(text, displayText, isButton) {
     noteActivity();
     selectDisplayOption(text, displayText || text);
-    sendToDisplay({ type: 'user_text', text: displayText || text });
+    sentUserText = displayText || text;
+    sendToDisplay({ type: 'user_text', text: sentUserText });
     sendThinking(true, null, false);   // anında görsel tepki (jestsiz)
     // Kullanıcı cevap verince geri sayımı HEMEN durdur: yanlış "süre doldu" tetiklenmesini
     // ve istek-yarışını önler (doğrulama LLM'e giderse sayaç dönmeye devam etmemeli).
@@ -997,8 +1022,15 @@
     // (aynı anda ai-text yazılırsa user-text kesilir) — ayrıca "düşünme" hissi verir.
     // Kullanıcı metni typewriter'ı (kısa oyun girdisi) bitsin diye küçük tampon;
     // bekleme hissini azaltmak için Faz 3'te kısaltıldı.
-    const gap = (p.kind === 'round') ? 480
-              : (isWord && p.kind === 'ai_word') ? 320 : 260;
+    let gap = (p.kind === 'round') ? 480
+            : (isWord && p.kind === 'ai_word') ? 320 : 260;
+    // Bulanık kabul: cevap doğru sayıldıysa sergideki kullanıcı balonuna ham STT
+    // yerine kabul edilen cevap yeniden yazılır; gap yeniden yazımı kapsar
+    // (yoksa ai_reply daktilosu düzeltmeyi yarıda keser — sergi tek activeTypewriter).
+    if (p.user_display && normalizeTr(p.user_display) !== normalizeTr(sentUserText)) {
+      sendToDisplay({ type: 'user_text', text: p.user_display, speed: 14 });
+      gap = Math.max(gap, p.user_display.length * 14 + 200);
+    }
     await new Promise((res) => setTimeout(res, gap));
 
     sendToDisplay({
@@ -1039,7 +1071,8 @@
         + (p.outcome ? ' | ' + p.outcome : ''));
     } else if (p.game === 'quiz') {
       log('jest', 'bilgi: ' + p.kind
-        + (p.dogru_mu === true ? ' ✓' : p.dogru_mu === false ? ' ✗' : ''));
+        + (p.dogru_mu === true ? ' ✓' : p.dogru_mu === false ? ' ✗' : '')
+        + (p.user_display ? ' | kabul: ' + p.user_display : ''));
     } else {
       log('sys', 'oyun: ' + p.kind);
     }

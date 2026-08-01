@@ -1324,6 +1324,7 @@
   let drvMaxChars = 240;         // /api/config max_user_input_chars ile güncellenir
   let drvGamePhase = null;       // null | 'menu' | 'kelime' | 'quiz' | ...
   let drvOptions = [];           // ekrandaki seçenek butonları (ses eşleşmesi için)
+  let drvSentUserText = '';      // balona son yazılan kullanıcı girdisi (fuzzy düzeltme kıyası)
   let drvBusy = false;           // aynı anda tek metin işlensin
   // Sigorta: beklenmedik bir asılı promise drvBusy'yi kilitlerse sürücü sağır
   // kalmasın — 15 sn'den eski busy bayat sayılır ve kilit açılır.
@@ -1459,8 +1460,15 @@
     drvGamePhase = (p.phase && p.phase !== 'idle') ? p.phase : null;
     const isTimed = (p.game === 'kelime' || p.game === 'quiz');
     // Kullanıcı metni typewriter'ı bitsin diye kısa tampon (panel ile aynı).
-    const gap = (p.kind === 'round') ? 480
-              : (p.game === 'kelime' && p.kind === 'ai_word') ? 320 : 260;
+    let gap = (p.kind === 'round') ? 480
+            : (p.game === 'kelime' && p.kind === 'ai_word') ? 320 : 260;
+    // Bulanık kabul: cevap doğru sayıldıysa kullanıcı balonundaki ham STT metni
+    // kabul edilen cevapla değiştirilir. gap yeniden yazmayı da kapsayacak kadar
+    // uzar — yoksa ai_reply'ın daktilosu düzeltmeyi yarıda keser (tek activeTypewriter).
+    if (p.user_display && normChoice(p.user_display) !== normChoice(drvSentUserText)) {
+      drvSend({ type: 'user_text', text: p.user_display, speed: 14 });
+      gap = Math.max(gap, p.user_display.length * 14 + 200);
+    }
     await sleep(gap);
     const rep = drvSend({
       type: 'ai_reply',
@@ -1529,6 +1537,14 @@
     drvSend({ type: 'thinking', on: true, jest: false });
     try {
       const data = await drvFetchJson('/api/game/start');
+      if (data.error) {
+        // 409 game_active: sunucu ortadaki oyunu korudu — fazı geri yükle ki
+        // sonraki söz oyuna aksın (desync'ten kendiliğinden çıkış).
+        if (data.phase) drvGamePhase = (data.phase !== 'idle') ? data.phase : null;
+        drvSend({ type: 'thinking', on: false });
+        console.warn('DRV: oyun başlatılamadı (' + data.error + ')');
+        return;
+      }
       await drvApplyPayload(data);
     } catch (e) {
       console.warn('DRV: oyun başlatılamadı', e);
@@ -1537,8 +1553,9 @@
   }
 
   async function drvGameInput(text, displayText) {
-    drvSend({ type: 'game_option_select', key: drvOptionKey(text, displayText), text: displayText || text });
-    drvSend({ type: 'user_text', text: displayText || text });
+    drvSentUserText = displayText || text;
+    drvSend({ type: 'game_option_select', key: drvOptionKey(text, displayText), text: drvSentUserText });
+    drvSend({ type: 'user_text', text: drvSentUserText });
     drvSend({ type: 'thinking', on: true, jest: false });
     // Cevap gelince geri sayımı HEMEN durdur (yanlış "süre doldu" yarışını önle).
     const wasUserWordTurn = (drvGamePhase === 'kelime' && drvTimer.who === 'user' && !!drvTimer.id);
@@ -1577,14 +1594,26 @@
   }
 
   async function drvNewSession(text) {
-    drvGamePhase = null;
-    drvStopTimer(false);
-    drvSend({ type: 'session_reset' });
-    if (text) drvSend({ type: 'user_text', text: text });
-    drvSend({ type: 'thinking', on: true });
+    // ÖNCE sunucuya sor, SONRA ekranı boz. /api/session/new aktif oyunu 409 ile
+    // koruyabilir (örn. sayfa yenilendi, istemci oyunu unuttu ama sunucuda
+    // yarışma sürüyor). Eski sıra ekranı silip ⏳ (bekle) jestini basıyor,
+    // 409 gelince öylece bırakıyordu — sahada "kum saati + her seste yeniden
+    // silinen ekran" takılması. Şimdi 409'da HİÇBİR görsel yıkım yok; sürücü
+    // fazı sunucudan geri öğrenir (kendiliğinden onarım) ve sonraki söz
+    // normal oyun girdisi olarak akar. session/new LLM'siz/hızlıdır — fetch'i
+    // öne almak görünür gecikme yaratmaz.
     try {
       const data = await drvFetchJson('/api/session/new', { reason: 'greet' });
-      if (data.error) { drvSend({ type: 'thinking', on: false }); return; }
+      if (data.error) {
+        if (data.phase) drvGamePhase = (data.phase !== 'idle') ? data.phase : null;
+        console.warn('DRV: yeni oturum reddedildi (' + data.error + ') — faz geri yüklendi: '
+          + (drvGamePhase || 'idle'));
+        return;
+      }
+      drvGamePhase = null;
+      drvStopTimer(false);
+      drvSend({ type: 'session_reset' });
+      if (text) drvSend({ type: 'user_text', text: text });
       if (data.phase === 'menu') {
         // Test modu: selamlama + oyun menüsü tek payload olarak gelir.
         await drvApplyPayload(data);
@@ -1600,7 +1629,6 @@
       await rep;
     } catch (e) {
       console.warn('DRV: yeni oturum açılamadı', e);
-      drvSend({ type: 'thinking', on: false });
     }
   }
 
@@ -1622,13 +1650,23 @@
         else await drvNewSession(text);   // goz modundan: her ses en basa doner (selam+menu)
         return;
       }
+      // OYUN AKTIFKEN her soz (selam dahil) OYUN GIRDISIDIR. Selamin "temiz
+      // baslangic" acmasi yalniz bosta gecerli: oyun ortasinda ikinci bir
+      // cocugun "merhaba"si (ya da STT'nin gurultuden selam uretmesi) surucuyu
+      // greet'e sokuyor, sunucu 409 ile reddedince istemci fazi kaybediyordu
+      // (sahadaki "kum saati + surekli yenilenen ekran" takilmasinin koku).
+      // Kural: aktif oyunu yalniz oyun kurallari bitirir (2 cevapsiz zaman
+      // asimi / buton) — backend /api/session/new korumasiyla ayni felsefe.
+      if (drvGamePhase) {
+        await drvGameInput(text, null);
+        return;
+      }
       if (DRV_GREETING_RE.test(normChoice(text))) {
         await drvNewSession(text);
         return;
       }
-      if (drvGamePhase || drvIsGameTrigger(text)) {
-        if (drvGamePhase) await drvGameInput(text, null);
-        else await drvStartGame(text);
+      if (drvIsGameTrigger(text)) {
+        await drvStartGame(text);
         return;
       }
       // Serbest sohbet (yalnizca normal mod; test modu yukarida ele alindi)
@@ -1742,7 +1780,8 @@
         if (els.aiText) els.aiText.textContent = '';
         els.gestureBadge.classList.add('hidden');
         fitSpeechText(els.userText, d.text || '');  // uzun mesaj: kaydirma yerine kucult
-        await typeInto(els.userText, d.text || '', 26);
+        // speed: fuzzy düzeltme yeniden yazımı daha hızlı aksın diye geçilebilir
+        await typeInto(els.userText, d.text || '', (typeof d.speed === 'number') ? d.speed : 26);
       } else if (d.type === 'ai_reply') {
         setThinking(false);                        // "Düşünüyorum…" göstergesini kapat
         if (d.jest_id) {

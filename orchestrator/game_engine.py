@@ -234,7 +234,8 @@ def _load_json_list(path):
 
 
 # ——— Quiz saglayicilar — her biri tekduze soru dict uretir ————
-# Soru dict: {"id", "prompt", "accept_norm": set, "reveal": str, "match": "token"|"substring"}
+# Soru dict: {"id", "prompt", "accept_norm": set, "accept_display": {norm: orijinal},
+#             "reveal": str, "match": "token"|"substring"}
 class _Provider:
     key = ""
     label = ""
@@ -270,6 +271,8 @@ class _EsZitProvider(_Provider):
         return {"id": kelime,
                 "prompt": f"'{_cap(kelime)}' kelimesinin {tip_ad} anlamlısı ne?",
                 "accept_norm": self.norm[kelime][tip],
+                # norm -> ekran hali: fuzzy kabulde kullanici balonuna bu yazilir
+                "accept_display": {normalize(x): _cap(x) for x in self.data[kelime][tip]},
                 "reveal": _cap(self.data[kelime][tip][0]),
                 # STT bias: kabul edilen cevaplarin ORIJINAL (Turkce harfli) halleri —
                 # web_server bunlari whisper initial_prompt'a ekler.
@@ -297,6 +300,7 @@ class _AtasozuProvider(_Provider):
         return {"id": it["bas"],
                 "prompt": f"'{it['bas']} …' nasıl devam eder?",
                 "accept_norm": {normalize(x) for x in it["tamam"]},
+                "accept_display": {normalize(x): x for x in it["tamam"]},
                 "reveal": f"{it['bas']} {it['tamam'][0]}",
                 # STT bias: atasozunun tam hali(leri) — cocuk devamini soylerken
                 # Whisper dogru kelimelere cekilir ("göl olur" vb.).
@@ -328,6 +332,9 @@ class _DogruYanlisProvider(_Provider):
         return {"id": it["ifade"],
                 "prompt": f"'{it['ifade']}' — doğru mu, yanlış mı?",
                 "accept_norm": set(accept),
+                # Hangi varyant soylenirse soylensin ("evet", "doru"...) ekranda
+                # kanonik "Dogru"/"Yanlis" gorunur.
+                "accept_display": {a: dy for a in accept},
                 "reveal": f"{dy} — {it.get('aciklama', '')}".strip(" —"),
                 "hints": ["doğru", "yanlış"],
                 "match": "token"}
@@ -939,7 +946,8 @@ class GameEngine:
                 {"key": "cikis", "label": "Çıkış"}]
 
     def _quiz_payload(self, kind, *, turn, jest_id, yanit, yogunluk=0.8,
-                      quiz_progress=None, dogru_mu=None, timer=None, ended=False, buttons=None):
+                      quiz_progress=None, dogru_mu=None, timer=None, ended=False,
+                      buttons=None, user_display=None):
         return {
             "game": "quiz",
             "phase": self.phase,
@@ -952,6 +960,9 @@ class GameEngine:
             "score": None,                 # ilerleme quiz_progress'te
             "quiz_progress": quiz_progress,
             "dogru_mu": dogru_mu,
+            # Dogru kabul edilen cevabin ekran hali: istemci kullanici balonundaki
+            # ham STT metnini bununla degistirir (fuzzy kabul gorunur olsun).
+            "user_display": user_display,
             "timer": timer,
             "buttons": (buttons if buttons is not None
                         else ([] if self.voice_only else [{"key": "cikis", "label": "Çıkış"}])),
@@ -1001,15 +1012,16 @@ class GameEngine:
         self.quiz_timeout_streak = 0
         return self._quiz_ask_next()
 
-    def _quiz_ask_next(self, prefix=None, dogru_mu=None) -> dict:
+    def _quiz_ask_next(self, prefix=None, dogru_mu=None, user_display=None) -> dict:
         """Sonraki soruyu sor; soru kalmadi/sayi doldu -> bitir.
-        prefix: bir onceki cevabin geri bildirimi (ayni mesaja eklenir)."""
+        prefix: bir onceki cevabin geri bildirimi (ayni mesaja eklenir).
+        user_display: onceki cevap fuzzy kabul edildiyse balona yazilacak hali."""
         if self.quiz_q_index >= self.QUIZ_QUESTION_COUNT:
-            return self._quiz_end(prefix=prefix)
+            return self._quiz_end(prefix=prefix, user_display=user_display)
         prov = self._providers[self.quiz_provider]
         q = prov.next_question(self.quiz_used)
         if q is None:
-            return self._quiz_end(prefix=prefix)
+            return self._quiz_end(prefix=prefix, user_display=user_display)
         self.quiz_used.add(q["id"])
         self.quiz_current = q
         self.quiz_q_index += 1
@@ -1023,12 +1035,16 @@ class GameEngine:
             jest = random.choice(_JEST["kel_intro"])
         return self._quiz_payload(
             "quiz_question", turn="soru", jest_id=jest, yanit=yanit, yogunluk=0.85,
-            dogru_mu=dogru_mu,
+            dogru_mu=dogru_mu, user_display=user_display,
             quiz_progress=f"Soru {self.quiz_q_index}/{self.QUIZ_QUESTION_COUNT} · Doğru {self.quiz_score['dogru']}",
             timer={"seconds": self.USER_TURN_SECONDS, "who": "user"})
 
-    def _quiz_check(self, q, text: str) -> bool:
+    def _quiz_check(self, q, text: str):
         """Cevap kontrolu — token (kume kesisimi) veya substring (atasozu).
+
+        Donus: ESLESEN kabul cevabi (accept_norm uyesi, truthy) veya None.
+        Bool yerine eslesen cevabin donmesi, fuzzy kabulde ekrana ham STT yerine
+        kabul edilen cevabin yazilabilmesi icindir (accept_display ile).
 
         Cevaplar DOSYADA yazili oldugundan eslestirme STT'ye karsi hosgoruludur
         (sergi ilkesi: yanlis RED, yanlis KABULDEN kotudur):
@@ -1040,32 +1056,35 @@ class GameEngine:
           kelimelerinin cogu (fuzzy) soylenmisse dogru ('göl oldu'~'göl olur')."""
         un = normalize(text)
         if not un:
-            return False
+            return None
         acc = q["accept_norm"]
         if q.get("match") == "substring":
-            if any(a and (a in un or un in a) for a in acc):
-                return True
+            for a in acc:
+                if a and (a in un or un in a):
+                    return a
             return self._substring_yaklasik(acc, un)
         cand = {un} | set(un.split())
         if " " in un:
             cand.add(un.replace(" ", ""))   # STT kelimeyi boldu: "koca man"
-        if acc & cand:
-            return True
+        ortak = acc & cand
+        if ortak:
+            return next(iter(ortak))
         fon_cand = {_fon(c) for c in cand}
         for a in acc:
             fa = _fon(a)
             if fa in fon_cand:
-                return True
+                return a
             tol = 2 if len(a) >= 8 else (1 if len(a) >= 5 else 0)
             if tol and any(self._duzenleme_mesafesi(fa, c) <= tol for c in fon_cand):
-                return True
-        return False
+                return a
+        return None
 
-    def _substring_yaklasik(self, acc, un: str) -> bool:
+    def _substring_yaklasik(self, acc, un: str):
         """Atasozu icin yaklasik dogru: kabul cevabinin ayirt edici (>=3 harf,
         dolgu olmayan) kelimelerinin >=%60'i, fonetik/yazim toleransiyla
         transkriptte geciyorsa dogru say. 'göl oluyor', 'iki elin sesi bar'
-        gibi STT bozulmalari boylece cevap yanmaz."""
+        gibi STT bozulmalari boylece cevap yanmaz.
+        Donus: eslesen kabul cevabi veya None (_quiz_check sozlesmesi)."""
         tokens = un.split()
         for a in acc:
             a_toks = [t for t in a.split() if len(t) >= 3 and t not in self._YAKIN_STOP]
@@ -1081,8 +1100,8 @@ class GameEngine:
                        for t in tokens):
                     hit += 1
             if hit >= gerek:
-                return True
-        return False
+                return a
+        return None
 
     # Quiz onay replikleri — SES ON-URETIMI icin sabit/dusuk-varyant. Rastgele
     # tezahurat cevaba YAPISTIRILMAZ: onek (tezahurat/uyari) ayri cumle, "Cevap: X"
@@ -1163,12 +1182,18 @@ class GameEngine:
         q = self.quiz_current
         beklenen = (q["reveal"] if q else "?").rstrip(" .")  # cift nokta olmasin
         self.quiz_score["toplam"] += 1
-        if not timeout and q and self._quiz_check(q, text):
+        eslesen = None if (timeout or not q) else self._quiz_check(q, text)
+        user_display = None
+        if eslesen:
             self.quiz_score["dogru"] += 1
             # 3 sabit tezahurat arasinda donusumlu (deterministik -> pre-gen dostu)
             cheer = self._QUIZ_DOGRU_CHEER[self.quiz_score["dogru"] % len(self._QUIZ_DOGRU_CHEER)]
             geri = f"{cheer} Cevap: {beklenen}."
             dogru = True
+            # Fuzzy kabulde kullanici balonunda ham STT degil kabul edilen
+            # cevabin kendisi gorunsun ("göl oldu" yazip dogru sayilmasi kafa
+            # karistiriyordu) — istemci user_display'i balona geri yazar.
+            user_display = (q.get("accept_display") or {}).get(eslesen)
         else:
             if timeout:
                 onek = "Süre doldu!"
@@ -1179,9 +1204,9 @@ class GameEngine:
                 onek = havuz[yanlis_n % len(havuz)]
             geri = f"{onek} Cevap: {beklenen}."     # "Cevap: X" cumlesi dogru/yanlis'ta ORTAK
             dogru = False
-        return self._quiz_ask_next(prefix=geri, dogru_mu=dogru)
+        return self._quiz_ask_next(prefix=geri, dogru_mu=dogru, user_display=user_display)
 
-    def _quiz_end(self, prefix=None) -> dict:
+    def _quiz_end(self, prefix=None, user_display=None) -> dict:
         self.quiz_turn = None
         self._log_game("quiz", "bitti",
                        f"tur={self.quiz_provider} skor={self.quiz_score['dogru']}/"
@@ -1202,6 +1227,7 @@ class GameEngine:
         # (gen_batch_elevenlabs) quiz_end birimi de 0.85 uretir (yoksa Bitti/kapanis kacar).
         return self._quiz_payload(
             "quiz_end", turn=None, jest_id=jest, yanit=yanit, yogunluk=0.85,
+            user_display=user_display,
             quiz_progress=f"Bitti · {d}/{t} doğru", timer=None, ended=True,
             buttons=self._quiz_end_buttons())
 

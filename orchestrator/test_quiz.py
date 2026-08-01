@@ -33,14 +33,17 @@ def test_providers():
     q = p.next_question(set())
     check("eszit prompt", "anlamlısı" in q["prompt"])
     check("eszit accept", "beyaz" in q["accept_norm"])
+    check("eszit display", q["accept_display"].get("beyaz") == "Beyaz")
     check("eszit tukenme", p.next_question({"siyah"}) is None)
     a = _AtasozuProvider([{"bas": "Damlaya damlaya", "tamam": ["göl olur"]}])
     qa = a.next_question(set())
     check("atasozu match substring", qa["match"] == "substring")
     check("atasozu accept", "gol olur" in qa["accept_norm"])
+    check("atasozu display", qa["accept_display"].get("gol olur") == "göl olur")
     d = _DogruYanlisProvider([{"ifade": "Test", "dogru": True, "aciklama": "x"}])
     qd = d.next_question(set())
     check("dy accept dogru", "dogru" in qd["accept_norm"] and "evet" in qd["accept_norm"])
+    check("dy display varyant -> kanonik", qd["accept_display"].get("evet") == "Doğru")
     check("dy reveal", qd["reveal"].startswith("Doğru"))
 
 
@@ -125,6 +128,34 @@ def test_quiz_yanlis_onekleri():
     p = g.handle("qqqqq")                  # alakasiz -> notr yanlis
     check("notr onek", any(p["yanit"].startswith(o) for o in GameEngine._QUIZ_YANLIS))
     check("eski sabit 'Yaklaştın!' yok", not p["yanit"].startswith("Yaklaştın!"))
+
+
+def test_quiz_user_display():
+    # Fuzzy kabulde payload'a kabul edilen cevabin ekran hali (user_display)
+    # yazilir: istemci kullanici balonundaki ham STT metnini bununla degistirir.
+    g = GameEngine(bridge=None, word_llm=None,
+                   ea_data={"güzel": {"zit": ["çirkin"]}, "cesur": {"zit": ["korkak"]}},
+                   atasozu_data=[{"bas": "Damlaya damlaya", "tamam": ["göl olur"]}],
+                   dogru_yanlis_data=list(TEST_DY))
+    # eszit: 1 harf bozuk soyleyis (STT toleransi) kabul -> ekranda kanonik hali
+    g.start(); g.handle("eszit"); g.handle("başla")
+    dogru_hali = next(iter(g.quiz_current["accept_display"].values()))
+    cevap = next(iter(g.quiz_current["accept_norm"]))
+    p = g.handle(cevap[:-1] + "x")
+    check("eszit fuzzy -> user_display kanonik", p["user_display"] == dogru_hali)
+    check("eszit user_display buyuk harfli", p["user_display"][0].isupper())
+    p = g.handle("qqqqq")
+    check("yanlis cevapta user_display yok", p["user_display"] is None)
+    # atasozu: 'göl oldu' fuzzy kabul; tek soruluk veri quiz_end'e dusurse de tasinir
+    g.start(); g.handle("atasozu"); g.handle("başla")
+    p = g.handle("göl oldu")
+    check("atasozu fuzzy -> 'göl olur'", p["user_display"] == "göl olur")
+    check("atasozu fuzzy dogru sayildi", g.quiz_score["dogru"] == 1)
+    # dogruyanlis: hangi varyant soylenirse soylensin ekranda 'Doğru'/'Yanlış'
+    g.start(); g.handle("dogruyanlis"); g.handle("başla")
+    ans = "evet" if "evet" in g.quiz_current["accept_norm"] else "hayır"
+    p = g.handle(ans)
+    check("dy varyant -> kanonik", p["user_display"] in ("Doğru", "Yanlış"))
 
 
 # ——— Duz 4 oyunlu menu akisi ———
@@ -282,6 +313,9 @@ def test_http_quiz():
     cfg = ws.load_config()
     cfg["warmup_on_start"] = False
     cfg["tts_enabled"] = False
+    # Laptop config'inde test_mode=true kalmis olabilir — testi kararli kilmak
+    # icin normal mod zorlanir (sinirli menu davranisi test_http_test_modu'nda).
+    cfg["test_mode"] = False
     c = ws.create_app(cfg).test_client()
 
     def post(u, **b):
@@ -291,14 +325,31 @@ def test_http_quiz():
     check("http menu", p["phase"] == "menu"
           and [b["key"] for b in p["buttons"]] == ["kelime", "eszit", "atasozu", "dogruyanlis"])
     for sel in ("eszit", "atasozu", "dogruyanlis"):
+        # Onceki turdan AKTIF yarisma kalir; /api/game/start artik canli oyunu
+        # 409 ile korur (desync'li istemci sifirlamasin) — once temiz cikis.
+        post("/api/game/exit")
         post("/api/game/start")
         post("/api/game/input", text=sel)
         p = post("/api/game/input", text="başla")
         check(f"http {sel} question", p["kind"] == "quiz_question" and p["quiz"] == sel)
+    # Aktif yarisma varken start REDDEDILIR (istemciye faz bildirilir)
+    r = c.post("/api/game/start")
+    check("http start aktif oyunu korur", r.status_code == 409
+          and r.get_json().get("error") == "game_active"
+          and r.get_json().get("phase") == "quiz")
+    # Aktif yarisma varken sesli selam (session/new) da REDDEDILIR
+    r = c.post("/api/session/new", json={"reason": "greet"})
+    check("http greet aktif oyunu korur", r.status_code == 409
+          and r.get_json().get("phase") == "quiz")
     # Kelime hala menuden erisilebilir
+    post("/api/game/exit")
     post("/api/game/start")
     p = post("/api/game/input", text="kelime")
     check("http kelime ready", p["game"] == "kelime" and p["turn"] == "hazir")
+    # Kelime hazir ekrani da CANLI sayilir: start/greet sifirlayamaz
+    r = c.post("/api/game/start")
+    check("http start kelimeyi korur", r.status_code == 409
+          and r.get_json().get("phase") == "kelime")
 
 
 def test_http_test_modu():
@@ -352,6 +403,7 @@ if __name__ == "__main__":
     test_quiz_check_modes()
     test_quiz_yakinlik()
     test_quiz_yanlis_onekleri()
+    test_quiz_user_display()
     test_quiz_onek_tts_uzunlugu()
     test_menu_flat_4()
     test_menu_selects_each_game()

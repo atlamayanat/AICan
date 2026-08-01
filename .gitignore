@@ -50,6 +50,8 @@ orchestrator/.env
 # NOT: .gitignore satir-ici yorumu desteklemez; aciklamalar kendi satirinda.
 # uretilen ses onbellegi (runtime)
 orchestrator/tts/cache/
+# onbellek arsiv yedegi (400MB — GitHub 100MB sinirinin ustunde, sadece lokal)
+orchestrator/tts/*.rar
 # 60MB ses modeli — README'deki komutla indirilir
 orchestrator/tts/voices/*.onnx
 orchestrator/tts/voices/*.onnx.json

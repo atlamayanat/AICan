@@ -877,22 +877,24 @@ def create_app(config: dict) -> Flask:
         Bu akista LLM'e gidilmez; karsilama sabit kalir ki kiosk her ziyaretciye
         temiz ve hizli bir acilis yapsin.
 
-        KORUMA: Aktif (girdi almaya devam eden) bir yarisma yalnizca "ziyaretci
-        gitti" kararlariyla (attract/idle_reset/end_to_eyes) sifirlanabilir.
-        Acik unutulmus ikinci bir sergi sekmesi/istemci gurultuyle 'greet'
-        atarsa ORTADAKI OYUN bozulmasin. Sayfa yenilenip oyun sahipsiz kaldiysa
-        (60+ sn girdisiz) eskimis sayilir ve sifirlamaya izin verilir — yoksa
-        kiosk sonsuza dek "oyun aktif" diye selam veremezdi.
+        KORUMA: Aktif (girdi almaya devam eden) bir oyun (quiz VEYA kelime)
+        yalnizca "ziyaretci gitti" kararlariyla (attract/idle_reset/end_to_eyes)
+        sifirlanabilir. Acik unutulmus ikinci bir sergi sekmesi/istemci
+        gurultuyle 'greet' atarsa ORTADAKI OYUN bozulmasin. Sayfa yenilenip
+        oyun sahipsiz kaldiysa (60+ sn girdisiz) eskimis sayilir ve sifirlamaya
+        izin verilir — yoksa kiosk sonsuza dek "oyun aktif" diye selam veremezdi.
+        409 yaniti phase tasir: istemci fazi geri yukleyip kendini onarir.
         """
         payload = request.get_json(silent=True) or {}
         reason = str(payload.get("reason") or "eski_istemci")[:24]
         with game_lock:
-            aktif_quiz = (game.phase == "quiz" and game.quiz_turn is not None)
+            aktif_oyun = ((game.phase == "quiz" and game.quiz_turn is not None)
+                          or (game.phase == "kelime" and game.word_turn is not None))
             taze = (time.time() - game_last_input["t"]) < 60
-            if (aktif_quiz and taze
+            if (aktif_oyun and taze
                     and reason not in ("attract", "idle_reset", "end_to_eyes")):
                 logger.log_event(
-                    f"session/new REDDEDILDI: aktif yarisma korundu (neden={reason})")
+                    f"session/new REDDEDILDI: aktif oyun korundu (neden={reason})")
                 return jsonify({"error": "game_active", "phase": game.phase}), 409
         bridge.clear_history()
         if test_mode["on"]:
@@ -957,7 +959,18 @@ def create_app(config: dict) -> Flask:
     # ——— Oyun modu (Kelime Türetme; deterministik akis, AI kelimeleri temali havuzdan) ————
     @app.post("/api/game/start")
     def api_game_start():
+        # KORUMA: /api/session/new ile ayni kural — CANLI bir oyun start ile
+        # sifirlanmasin. Fazi kaybetmis (sayfa yenilenmis / payload kacirmis)
+        # bir istemci "oyun oynayalim" duyunca start cagirir ve ORTADAKI
+        # yarismayi menuye dondururdu. 409 + phase doner; istemci fazi geri
+        # yukler, sonraki girdi oyuna akar (kendiliginden onarim).
         with game_lock:
+            aktif_oyun = ((game.phase == "quiz" and game.quiz_turn is not None)
+                          or (game.phase == "kelime" and game.word_turn is not None))
+            taze = (time.time() - game_last_input["t"]) < 60
+            if aktif_oyun and taze:
+                logger.log_event("game/start REDDEDILDI: aktif oyun korundu")
+                return jsonify({"error": "game_active", "phase": game.phase}), 409
             result = game.start()
         game_last_input["t"] = time.time()
         logger.log_event("Oyun baslatildi (kelime turetme)")
