@@ -441,6 +441,9 @@ class GameEngine:
         # session_logger: SessionLogger benzeri (log_game). Gozlem amacli; None ise
         # loglama sessizce atlanir — oyun akisini hicbir kosulda etkilemez.
         self.session_logger = session_logger
+        # sergi_logger: SergiLogger benzeri (ziyaretci bazli sergi olcumu).
+        # web_server atar; None ise tum sergi olaylari sessizce atlanir.
+        self.sergi_logger = None
         self.phase = "idle"
         # Test/sergi gunu sinirlamasi: None = tum oyunlar; ör. ("eszit","atasozu")
         # -> menude yalnizca bunlar gorunur ve secilebilir (web_server yonetir).
@@ -530,6 +533,16 @@ class GameEngine:
         except Exception as e:  # noqa: BLE001 — loglama oyunu asla durdurmasin
             log.debug("Oyun logu yazilamadi: %s", e)
 
+    def _sergi(self, metot: str, *args, **kwargs) -> None:
+        """Sergi ziyaretci olayini sergi_logger'a ilet (varsa). Hata yutulur."""
+        sl = self.sergi_logger
+        if sl is None:
+            return
+        try:
+            getattr(sl, metot)(*args, **kwargs)
+        except Exception as e:  # noqa: BLE001 — loglama oyunu asla durdurmasin
+            log.debug("Sergi logu yazilamadi: %s", e)
+
     # ——— Disa acilan API ————————————————————————————————————
     def start(self) -> dict:
         """Oyunu baslat: DUZ 4 secenekli menuye gec (sabit cevap, LLM yok)."""
@@ -551,6 +564,13 @@ class GameEngine:
 
     def _menu_buttons(self):
         return [dict(b) for b in self._MENU_TUM if self._oyun_izinli(b["key"])]
+
+    # ——— Sergi ekrani ses yonlendirme baloncugu ————————————————————
+    # payload["hint"]: ziyaretcinin O AN soylemesi beklenen sey. Sergi ekraninda
+    # secenek ovalleriyle ayni bantta 🎤'li kucuk bir balon olarak cizilir.
+    # TTS'e GIRMEZ (yanit metinleri degismedi -> ses cache isabeti korunur).
+    def _hint_basla(self) -> str:
+        return "«Başla» de" if self.voice_only else "«Başla» de ya da butona dokun"
 
     def _menu_payload(self, reprompt=False) -> dict:
         # Metin butonlardan turetilir; tum oyunlar izinliyken eski sabit
@@ -577,6 +597,8 @@ class GameEngine:
             "ai_move": None,
             "outcome": None,
             "buttons": self._menu_buttons(),
+            "hint": ("Oyunun adını söyle" if self.voice_only
+                     else "Dokun ya da oyunun adını söyle"),
             "ended": False,
         }
 
@@ -611,6 +633,7 @@ class GameEngine:
                 and self._oyun_izinli("dogruyanlis")):
             self.quiz_provider = "dogruyanlis"
             return self._start_quiz()
+        self._sergi("anlamsiz", "menu", n)
         return self._menu_payload(reprompt=True)
 
     def exit(self) -> dict:
@@ -620,6 +643,9 @@ class GameEngine:
             self._log_game("kelime", "yarim_birakildi",
                            f"skor=ai:{self.word_score['ai']} "
                            f"ziyaretci:{self.word_score['user']}")
+            self._sergi("game_end", "yarim_birakildi",
+                        skor=f"ai:{self.word_score['ai']} "
+                             f"ziyaretci:{self.word_score['user']}")
         self.phase = "idle"
         self._reset_word()
         self._reset_quiz()
@@ -713,7 +739,8 @@ class GameEngine:
 
     def _kel_payload(self, kind, *, turn, jest_id, yanit, yogunluk=0.8,
                      required_letter=None, ai_word=None, user_word=None,
-                     timer=None, ended=False, outcome=None, buttons=None):
+                     timer=None, ended=False, outcome=None, buttons=None,
+                     hint=None):
         return {
             "game": "kelime",
             "phase": self.phase,
@@ -729,6 +756,7 @@ class GameEngine:
             "score": dict(self.word_score),
             "timer": timer,
             "buttons": buttons if buttons is not None else self._kel_buttons(),
+            "hint": hint,
             "ended": ended,
             "outcome": outcome,
         }
@@ -765,6 +793,7 @@ class GameEngine:
         self.phase = "kelime"
         self._reset_word()
         self.word_turn = "hazir"   # onay bekleniyor
+        self._sergi("game_select", "kelime")
         yanit = (
             "Kelime türetme oynayalım! Ben bir kelime söylerim. Sen de son "
             "harfiyle başlayan yeni bir kelime söyle. Sırayla devam ederiz. "
@@ -774,7 +803,7 @@ class GameEngine:
         return self._kel_payload(
             "ready", turn="hazir", jest_id=random.choice(_JEST["kel_intro"]),
             yanit=yanit, yogunluk=0.8, timer=None,
-            buttons=self._kel_ready_buttons(),
+            buttons=self._kel_ready_buttons(), hint=self._hint_basla(),
         )
 
     def _handle_kelime_ready(self, text: str) -> dict:
@@ -785,10 +814,11 @@ class GameEngine:
             return self.start()
         if _ready_mi(n):
             return self._begin_kelime()
+        self._sergi("anlamsiz", "hazir", n)
         return self._kel_payload(
             "ready", turn="hazir", jest_id="bekle",
             yanit="Hazır olunca 'başla' de ya da butona dokun :)", yogunluk=0.6,
-            timer=None, buttons=self._kel_ready_buttons(),
+            timer=None, buttons=self._kel_ready_buttons(), hint=self._hint_basla(),
         )
 
     def _begin_kelime(self) -> dict:
@@ -796,6 +826,7 @@ class GameEngine:
         Oyun sırasında AI yalnızca KELİMEYLE cevap verir (yanit = kelime)."""
         self.word_starter = "ai" if random.random() < 0.5 else "user"
         self._log_game("kelime", "basladi", f"baslayan={self.word_starter}")
+        self._sergi("game_begin")
         if self.word_starter == "ai":
             kelime = self._pick_ai_word(None, self.word_used) or random.choice(_KEL_SEED)
             self.word_used.add(temiz_kelime(kelime))
@@ -822,12 +853,16 @@ class GameEngine:
         self._log_game("kelime", "bitti",
                        f"kazanan=ai sebep={reason} "
                        f"skor=ai:{self.word_score['ai']} ziyaretci:{self.word_score['user']}")
+        self._sergi("game_end", "bitti",
+                    skor=f"kazanan=ai ai:{self.word_score['ai']} "
+                         f"ziyaretci:{self.word_score['user']}")
         txt_key = "kel_user_lose_timeout" if reason == "timeout" else "kel_user_lose_invalid"
         return self._kel_payload(
             "ended", turn=None, jest_id=random.choice(_JEST["kel_user_lose"]),
             yanit=random.choice(_TXT[txt_key]), yogunluk=0.8,
             timer=None, ended=True, outcome="ai_win",
             buttons=self._kel_end_buttons(),
+            hint="«Yeni oyun» ya da «Menü» de",
         )
 
     def _handle_kelime(self, text: str, timeout: bool) -> dict:
@@ -913,11 +948,15 @@ class GameEngine:
         self._log_game("kelime", "bitti",
                        f"kazanan=ziyaretci sebep=ai_pes "
                        f"skor=ai:{self.word_score['ai']} ziyaretci:{self.word_score['user']}")
+        self._sergi("game_end", "bitti",
+                    skor=f"kazanan=ziyaretci ai:{self.word_score['ai']} "
+                         f"ziyaretci:{self.word_score['user']}")
         payload = self._kel_payload(
             "ai_concede", turn=None, jest_id=random.choice(_JEST["kel_ai_lose"]),
             yanit=random.choice(_TXT["kel_ai_lose"]).format(harf=req or "?"),
             yogunluk=0.85, timer=None, ended=True, outcome="user_win",
             buttons=self._kel_end_buttons(),
+            hint="«Yeni oyun» ya da «Menü» de",
         )
         payload["ai_error"] = ai_error  # True ise: gercek pes degil, Ollama erisilemedi
         return payload
@@ -939,7 +978,8 @@ class GameEngine:
                 {"key": "cikis", "label": "Çıkış"}]
 
     def _quiz_payload(self, kind, *, turn, jest_id, yanit, yogunluk=0.8,
-                      quiz_progress=None, dogru_mu=None, timer=None, ended=False, buttons=None):
+                      quiz_progress=None, dogru_mu=None, timer=None, ended=False,
+                      buttons=None, hint=None):
         return {
             "game": "quiz",
             "phase": self.phase,
@@ -955,6 +995,7 @@ class GameEngine:
             "timer": timer,
             "buttons": (buttons if buttons is not None
                         else ([] if self.voice_only else [{"key": "cikis", "label": "Çıkış"}])),
+            "hint": hint,
             "ended": ended,
             "outcome": None,
         }
@@ -968,13 +1009,15 @@ class GameEngine:
         self.quiz_current = None
         self.quiz_timeout_streak = 0
         self.quiz_turn = "hazir"
+        self._sergi("game_select", "quiz", self.quiz_provider)
         prov = self._providers[self.quiz_provider]
         kapanis = ("Hazırsan başlayalım — 'başla' de!" if self.voice_only
                    else "Hazırsan başlayalım — 'başla' de ya da butona dokun!")
         yanit = prov.intro(self.QUIZ_QUESTION_COUNT) + " " + kapanis
         return self._quiz_payload(
             "quiz_ready", turn="hazir", jest_id=random.choice(_JEST["kel_intro"]),
-            yanit=yanit, yogunluk=0.8, timer=None, buttons=self._quiz_ready_buttons())
+            yanit=yanit, yogunluk=0.8, timer=None, buttons=self._quiz_ready_buttons(),
+            hint=self._hint_basla())
 
     def _handle_quiz_ready(self, text: str, button: bool = False) -> dict:
         n = normalize(text)
@@ -987,18 +1030,21 @@ class GameEngine:
             return self.start()
         if _ready_mi(n):
             return self._begin_quiz()
+        self._sergi("anlamsiz", "hazir", n)
         bekle_txt = ("Hazır olunca 'başla' de :)" if self.voice_only
                      else "Hazır olunca 'başla' de ya da butona dokun :)")
         return self._quiz_payload(
             "quiz_ready", turn="hazir", jest_id="bekle",
             yanit=bekle_txt, yogunluk=0.6,
-            timer=None, buttons=self._quiz_ready_buttons())
+            timer=None, buttons=self._quiz_ready_buttons(),
+            hint=self._hint_basla())
 
     def _begin_quiz(self) -> dict:
         self.quiz_used = set()
         self.quiz_score = {"dogru": 0, "toplam": 0}
         self.quiz_q_index = 0
         self.quiz_timeout_streak = 0
+        self._sergi("game_begin")
         return self._quiz_ask_next()
 
     def _quiz_ask_next(self, prefix=None, dogru_mu=None) -> dict:
@@ -1153,10 +1199,14 @@ class GameEngine:
         # ya da sorular bitince sona erer.
         if timeout:
             self.quiz_timeout_streak += 1
+            self._sergi("question", "timeout")
             if self.quiz_timeout_streak >= 2:
                 self._log_game("quiz", "terk_edildi",
                                f"tur={self.quiz_provider} "
                                f"skor={self.quiz_score['dogru']}/{self.quiz_score['toplam']}")
+                self._sergi("game_end", "terk_edildi",
+                            dogru=self.quiz_score["dogru"],
+                            toplam=self.quiz_score["toplam"])
                 return self.exit()
         else:
             self.quiz_timeout_streak = 0
@@ -1169,6 +1219,7 @@ class GameEngine:
             cheer = self._QUIZ_DOGRU_CHEER[self.quiz_score["dogru"] % len(self._QUIZ_DOGRU_CHEER)]
             geri = f"{cheer} Cevap: {beklenen}."
             dogru = True
+            self._sergi("question", "dogru")
         else:
             if timeout:
                 onek = "Süre doldu!"
@@ -1179,6 +1230,8 @@ class GameEngine:
                 onek = havuz[yanlis_n % len(havuz)]
             geri = f"{onek} Cevap: {beklenen}."     # "Cevap: X" cumlesi dogru/yanlis'ta ORTAK
             dogru = False
+            if not timeout:
+                self._sergi("question", "yanlis")
         return self._quiz_ask_next(prefix=geri, dogru_mu=dogru)
 
     def _quiz_end(self, prefix=None) -> dict:
@@ -1186,6 +1239,9 @@ class GameEngine:
         self._log_game("quiz", "bitti",
                        f"tur={self.quiz_provider} skor={self.quiz_score['dogru']}/"
                        f"{self.quiz_score['toplam']}")
+        self._sergi("game_end", "bitti",
+                    dogru=self.quiz_score["dogru"],
+                    toplam=self.quiz_score["toplam"])
         d = self.quiz_score["dogru"]
         t = self.quiz_score["toplam"] or self.QUIZ_QUESTION_COUNT
         if d >= t * 0.8:
@@ -1203,7 +1259,8 @@ class GameEngine:
         return self._quiz_payload(
             "quiz_end", turn=None, jest_id=jest, yanit=yanit, yogunluk=0.85,
             quiz_progress=f"Bitti · {d}/{t} doğru", timer=None, ended=True,
-            buttons=self._quiz_end_buttons())
+            buttons=self._quiz_end_buttons(),
+            hint="«Tekrar» ya da «Menü» de")
 
     # ——— STT bias ipuclari ————————————————————————————————————
     # Menu secenekleri icin Whisper'a verilecek dogal soyleyisler.
