@@ -220,6 +220,43 @@
   let speakToken = 0;          // artan sayac: her yeni konusma eskisini iptal eder
   let audioQueue = [];         // sirada bekleyen blob URL'leri
   let queuePlaying = false;
+  let speakProducingToken = -1; // speak() hangi jeton icin hâlâ ses parçaları çekiyor
+  let speechWaiters = [];
+
+  // Kuyruk, iki fetch arasında kısa süre boş kalabilir. Üretici bitmeden bu
+  // boşluğu "konuşma bitti" saymak sayacı ve mikrofon kapısını erken açar.
+  function speechIdle() {
+    return speakProducingToken !== speakToken && !queuePlaying && audioQueue.length === 0;
+  }
+  function speechSettle() {
+    if (!speechIdle()) return;
+    const ws = speechWaiters; speechWaiters = [];
+    for (const w of ws) { try { w(); } catch (_) {} }
+  }
+  function whenSpeechDone(timeoutMs) {
+    if (speechIdle()) return Promise.resolve();
+    const ms = (typeof timeoutMs === 'number' && timeoutMs > 0) ? timeoutMs : 20000;
+    return new Promise((resolve) => {
+      let settled = false;
+      let tid = null;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        if (tid) clearTimeout(tid);
+        const i = speechWaiters.indexOf(finish);
+        if (i >= 0) speechWaiters.splice(i, 1);
+        resolve();
+      };
+      speechWaiters.push(finish);
+      tid = setTimeout(() => {
+        if (settled) return;
+        // Asılı fetch/oynatma sürücüyü sonsuza dek kilitlemesin; geç kalan ses
+        // cevap penceresi açıldıktan sonra başlamasın diye jetonu da iptal et.
+        console.warn('TTS bitişi ' + ms + ' ms içinde gelmedi — konuşma iptal edildi');
+        try { stopSpeech(); } finally { finish(); }
+      }, ms);
+    });
+  }
 
   // Cumle sinirlari: .!?… + bosluk. orchestrator/web_server.py _split_sentences_tr
   // ile BIREBIR ayni mantik (on-isitma onbellek anahtarlari isabet etsin diye).
@@ -251,6 +288,8 @@
     for (const u of audioQueue) { try { URL.revokeObjectURL(u); } catch (_) {} }
     audioQueue = [];
     if (stSpeaking) { stSpeaking = false; updateStateBadge(); }
+    speakProducingToken = -1;
+    speechSettle();
   }
 
   async function fetchSpeechUrl(text, jestId, yogunluk) {
@@ -271,7 +310,18 @@
     queuePlaying = true;
     stSpeaking = true;                     // "Konuşuyor…" rozeti
     updateStateBadge();
-    const a = new Audio(url);
+    let a;
+    try {
+      a = new Audio(url);
+    } catch (e) {
+      console.warn('Ses nesnesi oluşturulamadı', e);
+      try { URL.revokeObjectURL(url); } catch (_) {}
+      queuePlaying = false;
+      playQueue(token);
+      if (!queuePlaying && stSpeaking) { stSpeaking = false; updateStateBadge(); }
+      speechSettle();
+      return;
+    }
     currentAudio = a;
     let bitti = false;
     const done = () => {
@@ -283,21 +333,33 @@
       if (currentAudio === a) currentAudio = null;
       playQueue(token);                    // siradaki parca — kesintisiz devam
       if (!queuePlaying && stSpeaking) { stSpeaking = false; updateStateBadge(); }
+      speechSettle();
     };
     a.onended = done;
     a.onerror = done;
-    a.play().catch((e) => { console.warn('Ses oynatilamadi (autoplay kilidi?)', e); done(); });
+    try {
+      const started = a.play();
+      if (started && typeof started.catch === 'function') {
+        started.catch((e) => { console.warn('Ses oynatilamadi (autoplay kilidi?)', e); done(); });
+      }
+    } catch (e) {
+      console.warn('Ses oynatilamadi (autoplay kilidi?)', e);
+      done();
+    }
   }
 
   // Imza SABIT: speak(text, jestId, yogunluk) — ayni jest/yogunluk tum parcalara.
   async function speak(text, jestId, yogunluk) {
     if (!ttsEnabled || !text) return;
     stopSpeech();
+    const token = speakToken;
+    // İlk await'ten önce işaretle: speak() çağrısının hemen ardından kurulan
+    // whenSpeechDone bekleyicisi fetch aralığını yanlışlıkla boş sanmasın.
+    speakProducingToken = token;
     // Yankı filtresi referansı: mikrofon TTS çalarken kayıt yaparsa sunucu,
     // transkripti bu metinlerle kıyaslayıp salt yankıyı atar (viTranscribeAndSend).
     viTtsRecent.push(String(text));
     if (viTtsRecent.length > 2) viTtsRecent.shift();
-    const token = speakToken;
     const yog = (typeof yogunluk === 'number' ? yogunluk : 0.7);
     try {
       const parcalar = splitSentences(text);
@@ -314,6 +376,10 @@
       }
     } catch (e) {
       console.warn('TTS hata:', e);
+    } finally {
+      // Eski, iptal edilmiş fetch yeni speak() üreticisinin bayrağını söndürmesin.
+      if (speakProducingToken === token) speakProducingToken = -1;
+      speechSettle();
     }
   }
 
@@ -424,7 +490,13 @@
     const changed = testModeOn !== !!on;
     testModeOn = !!on;
     // Backend mod değişiminde oyun durumunu sıfırlar — sürücü de senkron kalsın.
-    if (changed) { drvGamePhase = null; drvOptions = []; }
+    if (changed) {
+      drvGamePhase = null;
+      drvTurnId = null;
+      drvInputGateAt = 0;
+      drvApplySeq++;
+      drvOptions = [];
+    }
     if (!testBadgeEl) {
       testBadgeEl = document.createElement('div');
       testBadgeEl.style.cssText =
@@ -773,6 +845,12 @@
     if (activeTypewriter && activeTypewriter.id) {
       clearInterval(activeTypewriter.id);
       if (activeTypewriter.el) activeTypewriter.el.classList.remove('typing');
+      // KRİTİK (typeInto'daki ile AYNI gerekçe): kesilen daktilonun promise'i de
+      // çözülsün. Yoksa onu await eden zincir (drvApplyPayload → whenSpeechDone →
+      // cevap penceresi + geri sayım) SONSUZA DEK asılı kalır: kapı Infinity'de
+      // kilitlenir (mikrofon sağır), yeni sayaç hiç başlamaz ve ekran yalnız
+      // 5 dk'lık boşta sigortasıyla kurtulur.
+      if (activeTypewriter.resolve) { try { activeTypewriter.resolve(); } catch (_) {} }
       activeTypewriter = null;
     }
     stTyping = false;
@@ -982,10 +1060,25 @@
     try { viRec.start(); } catch (e) { console.warn('VI: kayıt başlamadı', e); viRec = null; }
   }
 
+  function viInputGateAllows(speechStartAt) {
+    // Kapı yalnız oyun akışında geçerlidir; sohbet/selam/göz modu eskisi gibi
+    // her yeni sözü işler. İki damga da performance.now() zaman tabanındadır.
+    if (!drvGamePhase || speechStartAt >= drvInputGateAt) return true;
+    if (Number.isFinite(drvInputGateAt)) {
+      console.info('VI: oyun girdisi atıldı — konuşma cevap penceresinden '
+        + Math.max(0, Math.round(drvInputGateAt - speechStartAt)) + ' ms erken başladı');
+    } else {
+      console.info('VI: oyun girdisi atıldı — cevap penceresi hâlâ kapalı; konuşma '
+        + Math.max(0, Math.round(performance.now() - speechStartAt)) + ' ms önce başladı');
+    }
+    return false;
+  }
+
   function viOnRecStop() {
     const action = viPendingAction; viPendingAction = null;
     const chunks = viChunks; viChunks = [];
     const hadSpeech = viHadSpeech;
+    const speechStartAt = viSpeechStartAt;
     const durMs = performance.now() - viRecStartAt;
     // Konuşma başlangıcından öncesi sunucuda kırpılsın: kayıt sürekli açık
     // olduğundan blob'un başında sessizlik/TTS yankısı birikir — Whisper'a
@@ -996,16 +1089,23 @@
     viRec = null;       // sonraki tick yeni kayıt açar (cooldown'a göre)
     viStopping = false; // artık güvenle yeniden başlatılabilir
     if (action === 'send' && hadSpeech && chunks.length && durMs >= viMinSpeechMs()) {
+      if (!viInputGateAllows(speechStartAt)) return;
       const blob = new Blob(chunks, { type: viMime || 'audio/webm' });
-      viTranscribeAndSend(blob, trimMs, overlapTts);
+      viTranscribeAndSend(blob, trimMs, overlapTts, speechStartAt);
     }
   }
 
-  async function viTranscribeAndSend(blob, trimMs, overlapTts) {
+  async function viTranscribeAndSend(blob, trimMs, overlapTts, speechStartAt) {
     // Oyun-sonu→göz geçişi beklenirken duyulan ses (bitiş TTS'inin yankısı,
     // oda gürültüsü, geçiş sırasındaki söz) İŞLENMEZ: gözler her zaman görünür,
     // selam ancak gözler açıldıktan sonraki YENİ sesle başlar.
     if (drvEndPending) return;
+    // onstop'tan sonra önceki STT kuyruğunda beklerken kapı kapanmış olabilir;
+    // başlangıç damgasını blob'la taşı ki ikinci VAD parçası yeni soruya kaymasın.
+    if (!viInputGateAllows(speechStartAt)) {
+      if (!viBusyTranscribe) setSttWait(false);
+      return;
+    }
     // SES GİRDİSİ = ETKİNLİK: transkript boş dönse bile ("Duyamadım") ziyaretçi
     // KONUŞUYORDUR — boşta sayacı sıfırlanır. Aksi halde tanınmayan denemeler
     // birikip oyun ORTASINDA attract/sıfırlamayı tetikliyordu.
@@ -1013,7 +1113,10 @@
     if (viBusyTranscribe) {
       // Önceki STT sürerken biten söz DÜŞMESİN (eski davranış sessizce atıyordu
       // → "hiç almıyor"). En son söz tek slotta bekler; mevcut istek bitince işlenir.
-      viPendingBlob = { blob: blob, trimMs: trimMs, overlapTts: overlapTts };
+      viPendingBlob = {
+        blob: blob, trimMs: trimMs, overlapTts: overlapTts,
+        speechStartAt: speechStartAt,
+      };
       return;
     }
     viBusyTranscribe = true;   // viHoldUntil zaten viStopRecorder('send')'de ayarlandı
@@ -1050,6 +1153,9 @@
         + (m.trim_ms ? ' | trim ' + m.trim_ms + ' ms' : '')
         + (txt ? '' : ' | SONUÇ BOŞ (' + ((data && data.warning) || '?') + ')'));
       if (txt && !drvEndPending) {   // geçiş penceresinde biten STT de atılır
+        // STT sürerken cevap/timeout yeni tura geçmiş olabilir. Eski kaydı o
+        // turun güncel jetonuyla göndermemek için kapıyı gönderim öncesi yine doğrula.
+        if (!viInputGateAllows(speechStartAt)) return;
         // Oyunu EKRAN-İÇİ sürücü yürütüyorsa (drvGamePhase dolu) cevap panele
         // GİTMEZ: arka plandaki panel sekmesi Chrome kısıtlamasıyla dakikada bir
         // uyanır — cevap orada bekletilirken sayaç "süre doldu" der (kum saati +
@@ -1071,7 +1177,9 @@
       viBusyTranscribe = false;
       if (viPendingBlob) {       // sırada bekleyen söz varsa hemen işle
         const p = viPendingBlob; viPendingBlob = null;
-        viTranscribeAndSend(p.blob, p.trimMs, p.overlapTts);   // balon açık kalır
+        viTranscribeAndSend(
+          p.blob, p.trimMs, p.overlapTts, p.speechStartAt
+        );   // balon açık kalır
       } else {
         setSttWait(false);
       }
@@ -1373,13 +1481,17 @@
   ];
   let drvMaxChars = 240;         // /api/config max_user_input_chars ile güncellenir
   let drvGamePhase = null;       // null | 'menu' | 'kelime' | 'quiz' | ...
+  let drvTurnId = null;          // son uygulanan payload'ın sunucu tur jetonu
+  let drvInputGateAt = 0;        // performance.now(): Infinity=kapalı, 0=oyun dışında açık
+  let drvApplySeq = 0;           // bekleyen TTS sonrası eski payload'ın sayaç açmasını önler
   let drvOptions = [];           // ekrandaki seçenek butonları (ses eşleşmesi için)
   let drvSentUserText = '';      // balona son yazılan kullanıcı girdisi (fuzzy düzeltme kıyası)
   let drvBusy = false;           // aynı anda tek metin işlensin
-  // Sigorta: beklenmedik bir asılı promise drvBusy'yi kilitlerse sürücü sağır
-  // kalmasın — 15 sn'den eski busy bayat sayılır ve kilit açılır.
+  // Sunucu isteği 15 sn, TTS bitiş sigortası 20 sn sürebilir; daktilo ve ağ payı
+  // eklenince eski 15 sn eşiği meşru uzun quiz sorusunda kilidi erken açıyordu.
+  // Yine de beklenmedik asılı promise sürücüyü sonsuza dek sağır bırakmasın.
   let drvBusyAt = 0;
-  const DRV_BUSY_STALE_MS = 15000;
+  const DRV_BUSY_STALE_MS = 60000;
   function drvBusyActive() {
     if (!drvBusy) return false;
     if (Date.now() - drvBusyAt > DRV_BUSY_STALE_MS) {
@@ -1389,7 +1501,7 @@
     }
     return true;
   }
-  let drvTimer = { id: null, who: null, endsAt: 0 };
+  let drvTimer = { id: null, who: null, endsAt: 0, seconds: 0 };
   let drvLastActivityAt = Date.now();
   let drvAttractOn = false;
   let drvCountdownId = null;
@@ -1495,7 +1607,7 @@
   // ——— Kelime/quiz geri sayım OTORİTESİ (panelsiz modda) ———
   function drvStartTimer(seconds, who) {
     drvStopTimer(false);
-    drvTimer = { id: null, who: who, endsAt: Date.now() + seconds * 1000 };
+    drvTimer = { id: null, who: who, endsAt: Date.now() + seconds * 1000, seconds: seconds };
     drvSend({ type: 'timer_start', seconds: seconds, who: who });
     drvTimer.id = setInterval(() => {
       if (drvTimer.endsAt - Date.now() > 0) return;
@@ -1517,11 +1629,59 @@
     if (drvTimer.id) { clearInterval(drvTimer.id); drvTimer.id = null; }
     if (broadcast !== false) drvSend({ type: 'timer_stop' });
   }
+  // Sunucu 409'unu (stale_input / game_active) ADOPT et: faz + tur jetonu + kapı
+  // birlikte tazelenir. Jetonu almayı atlamak sessiz bir delik açıyordu — faz geri
+  // yüklenip drvTurnId null kalınca sonraki cevap turn_id=null ile gidiyordu ve
+  // sunucu (artık düzeltildi) onu doğrulamadan kabul edip yanlış soruyu tüketiyordu.
+  function drvAdoptServerState(data) {
+    if (!data) return;
+    if (Number.isInteger(data.turn_id)) drvTurnId = data.turn_id;
+    if (!data.phase) return;   // faz taşımayan hata: durum hakkında bilgi yok
+    drvGamePhase = (data.phase !== 'idle') ? data.phase : null;
+    // Kapıyı KAPALI bırakmayız: 409'dan sonra onu açacak yeni payload
+    // GELMEYEBİLİR — kapalı kapı mikrofonu oyun boyunca sağır bırakır, ekran
+    // 5 dk'lık sigortaya kadar ölü görünür. Açık kapı + sunucu jetonu birlikte
+    // güvenli: yanlış soruyu tüketme riskini jeton zaten kesiyor.
+    drvInputGateAt = drvGamePhase ? performance.now() : 0;
+  }
+  function drvRestoreInputAfterFailure(turnId, timer) {
+    // İstek işlenmiş ama yanıt kaybolmuşsa aynı jetonlu tekrar sunucuda 409 olur;
+    // işlenmemişse ziyaretçi aynı turu yeniden deneyebilir. Yalnız hâlâ aynı
+    // turdaysak aç ki daha yeni payload'ın kapı/sayacını geri sarmayalım.
+    if (drvTurnId !== turnId || !drvGamePhase || drvEndPending) return;
+    drvInputGateAt = performance.now();
+    if (timer && timer.seconds > 0 && timer.who) {
+      drvStartTimer(timer.seconds, timer.who);
+    }
+  }
   async function drvSubmitTimeout() {
+    drvInputGateAt = Infinity;
+    const turnId = drvTurnId;
+    const timerResume = (drvTimer.who === 'user' && drvTimer.seconds > 0)
+      ? { who: drvTimer.who, seconds: drvTimer.seconds } : null;
     try {
-      const data = await drvFetchJson('/api/game/input', { timeout: true });
-      if (!data.error) await drvApplyPayload(data);
-    } catch (e) { console.warn('DRV: timeout bildirilemedi', e); }
+      const data = await drvFetchJson('/api/game/input', { timeout: true, turn_id: turnId });
+      if (data.error === 'stale_input') {
+        // Bu istek beklerken daha yeni payload uygulandıysa onun açık kapısını
+        // eski 409 ile kapatma; resenkron yalnız hâlâ istek turundaysak gerekir.
+        if (drvTurnId === turnId) {
+          // Faz + jeton + kapı birlikte tazelenir; ziyaretçinin sonraki sözü GÜNCEL
+          // jetonla gider, sunucu işler, dönen payload istemciyi tam resenkronlar
+          // (409 game_active'deki "kendiliğinden onarım" felsefesi).
+          drvAdoptServerState(data);
+          console.info('DRV: bayat timeout reddedildi — faz/jeton yeniden eşitlendi');
+        }
+        return;
+      }
+      if (data.error) {
+        drvRestoreInputAfterFailure(turnId, timerResume);
+        return;
+      }
+      await drvApplyPayload(data);
+    } catch (e) {
+      console.warn('DRV: timeout bildirilemedi', e);
+      drvRestoreInputAfterFailure(turnId, timerResume);
+    }
   }
 
   async function drvAiTurn() {
@@ -1534,8 +1694,17 @@
   // control.js applyGamePayload portu — render mesajları yerel handleMessage'a.
   async function drvApplyPayload(p) {
     if (!p) return;
-    drvGamePhase = (p.phase && p.phase !== 'idle') ? p.phase : null;
+    const applySeq = ++drvApplySeq;
+    const payloadPhase = (p.phase && p.phase !== 'idle') ? p.phase : null;
+    drvGamePhase = payloadPhase;
+    if (Number.isInteger(p.turn_id)) drvTurnId = p.turn_id;
+    const payloadTurnId = drvTurnId;
+    // Yeni payload'ın sözü bitene kadar eski turun açık penceresi kullanılamaz.
+    drvInputGateAt = drvGamePhase ? Infinity : 0;
     const isTimed = (p.game === 'kelime' || p.game === 'quiz');
+    // Yeni sayaç TTS sonrasında başlayacak; o arada önceki turun sayacı ekranda
+    // işlemeye ve gecikmiş timeout üretmeye devam etmesin.
+    if (isTimed) drvStopTimer();
     // Kullanıcı metni typewriter'ı bitsin diye kısa tampon (panel ile aynı).
     let gap = (p.kind === 'round') ? 480
             : (p.game === 'kelime' && p.kind === 'ai_word') ? 320 : 260;
@@ -1557,21 +1726,17 @@
     });
     if (p.score) drvSend({ type: 'game_score', score: p.score, active: true });
     drvPublishOptions(p);
-    if (isTimed) {
-      if (p.ended || !p.timer) drvStopTimer();
-      else drvStartTimer(p.timer.seconds, p.timer.who);
-      // Yalnız kelime modunda AI turu otomatik istenir (panel ile aynı; await yok).
-      if (p.game === 'kelime' && !p.ended && p.turn === 'ai') drvAiTurn();
-    }
     let endedToEyes = false;
     if (p.ended && !isTimed) {
       // Çıkış/terk_edildi: veda repliği okunsun, test modunda sonra göz moduna dön.
       drvGamePhase = null;
+      drvInputGateAt = 0;
       drvSend({ type: 'game_exit' });
       endedToEyes = testModeOn;
     } else if (p.ended && testModeOn) {
       // Test modu: süreli oyun (quiz) bitti — bitiş mesajı okunsun, sonra göz moduna dön.
       drvGamePhase = null;
+      drvInputGateAt = 0;
       setTimeout(() => { if (!drvGamePhase) drvSend({ type: 'game_exit' }); }, DRV_TEST_END_LINGER_MS);
       endedToEyes = true;
     }
@@ -1581,6 +1746,23 @@
     if (endedToEyes) drvEndPending = true;
     try {
       await rep;
+      // handleMessage içinde speak(), 180 ms'lik ilk await'ten sonra başlar;
+      // bu yüzden idle kontrolü ancak rep daktilosu çözüldükten sonra güvenlidir.
+      await whenSpeechDone();
+      const stillCurrent = applySeq === drvApplySeq
+        && drvGamePhase === payloadPhase
+        && drvTurnId === payloadTurnId
+        && !drvEndPending;
+      if (!stillCurrent) return;
+      // Menü/hazır/bitiş seçenekleri de ses girdisi bekler; yalnız AI kelime
+      // turunda ziyaretçi penceresi açılmaz. Zaman tabanı viSpeechStartAt ile aynı.
+      if (drvGamePhase && p.turn !== 'ai') drvInputGateAt = performance.now();
+      else if (!drvGamePhase) drvInputGateAt = 0;
+      if (isTimed && !p.ended && p.timer) {
+        drvStartTimer(p.timer.seconds, p.timer.who);
+      }
+      // AI turu da önceki geri bildirimin sesi bittikten sonra ilerlesin.
+      if (p.game === 'kelime' && !p.ended && p.turn === 'ai') drvAiTurn();
     } finally {
       // await ETME: drvHandleText'in busy kilidi açık kalsın istemiyoruz — geçiş
       // kendi içinde bitiş sesinin bitmesini bekler, yeni etkileşim onu iptal eder.
@@ -1643,9 +1825,10 @@
     try {
       const data = await drvFetchJson('/api/game/start');
       if (data.error) {
-        // 409 game_active: sunucu ortadaki oyunu korudu — fazı geri yükle ki
-        // sonraki söz oyuna aksın (desync'ten kendiliğinden çıkış).
-        if (data.phase) drvGamePhase = (data.phase !== 'idle') ? data.phase : null;
+        // 409 game_active: sunucu ortadaki oyunu korudu — faz VE tur jetonunu geri
+        // yükle ki sonraki söz oyuna GEÇERLİ turla aksın (desync'ten kendiliğinden
+        // çıkış). Jeton alınmazsa cevap turn_id=null ile gidiyor ve reddediliyordu.
+        drvAdoptServerState(data);
         drvSend({ type: 'thinking', on: false });
         console.warn('DRV: oyun başlatılamadı (' + data.error + ')');
         return;
@@ -1658,26 +1841,46 @@
   }
 
   async function drvGameInput(text, displayText) {
+    drvInputGateAt = Infinity;
+    const turnId = drvTurnId;
     drvSentUserText = displayText || text;
     drvSend({ type: 'game_option_select', key: drvOptionKey(text, displayText), text: drvSentUserText });
     drvSend({ type: 'user_text', text: drvSentUserText });
     drvSend({ type: 'thinking', on: true, jest: false });
     // Cevap gelince geri sayımı HEMEN durdur (yanlış "süre doldu" yarışını önle).
     const wasUserWordTurn = (drvGamePhase === 'kelime' && drvTimer.who === 'user' && !!drvTimer.id);
+    const timerResume = drvTimer.id ? {
+      who: drvTimer.who,
+      seconds: Math.max(1, Math.ceil((drvTimer.endsAt - Date.now()) / 1000)),
+    } : null;
     drvStopTimer();
     let thinkId = null;
     if (wasUserWordTurn) {
       thinkId = setTimeout(() => drvSend({ type: 'thinking', on: true, label: 'Hmm, bakıyorum…' }), 450);
     }
     try {
-      const data = await drvFetchJson('/api/game/input', { text: text });
+      const data = await drvFetchJson('/api/game/input', { text: text, turn_id: turnId });
       if (thinkId) { clearTimeout(thinkId); thinkId = null; }
-      if (data.error) { drvSend({ type: 'thinking', on: false }); return; }
+      if (data.error) {
+        if (data.error === 'stale_input') {
+          // Daha yeni payload geldiyse eski 409'un faz/kapı durumunu geri sarmasına izin verme.
+          if (drvTurnId === turnId) {
+            drvAdoptServerState(data);
+            console.info('DRV: bayat cevap reddedildi — faz/jeton yeniden eşitlendi');
+          } else {
+            return;
+          }
+        }
+        drvSend({ type: 'thinking', on: false });
+        if (data.error !== 'stale_input') drvRestoreInputAfterFailure(turnId, timerResume);
+        return;
+      }
       await drvApplyPayload(data);
     } catch (e) {
       if (thinkId) clearTimeout(thinkId);
       console.warn('DRV: oyun girdisi işlenemedi', e);
       drvSend({ type: 'thinking', on: false });
+      drvRestoreInputAfterFailure(turnId, timerResume);
     }
   }
 
@@ -1710,7 +1913,9 @@
     try {
       const data = await drvFetchJson('/api/session/new', { reason: 'greet' });
       if (data.error) {
-        if (data.phase) drvGamePhase = (data.phase !== 'idle') ? data.phase : null;
+        // Faz ile BİRLİKTE tur jetonu da geri yüklenir: ziyaretçi ortadaki oyuna
+        // cevap vermeye devam edecek, jetonsuz gönderim ise reddedilir.
+        drvAdoptServerState(data);
         console.warn('DRV: yeni oturum reddedildi (' + data.error + ') — faz geri yüklendi: '
           + (drvGamePhase || 'idle'));
         return;
@@ -1934,6 +2139,11 @@
         resetSpeechPanels();
         hideGameOptions();
       } else if (d.type === 'session_reset') {
+        // Oturum sıfırlanırken bekleyen eski payload TTS sonrasında kapı/sayaç açmasın.
+        drvGamePhase = null;
+        drvTurnId = null;
+        drvInputGateAt = 0;
+        drvApplySeq++;
         stopSpeech();
         if (d.reload) {
           // Boşta-sıfırlama (attract zaman aşımı): sayfa oturum-tabanlı olduğundan

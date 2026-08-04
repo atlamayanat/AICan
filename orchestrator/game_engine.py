@@ -452,6 +452,17 @@ class GameEngine:
         # web_server atar; None ise tum sergi olaylari sessizce atlanir.
         self.sergi_logger = None
         self.phase = "idle"
+        # ——— Tur jetonu (soru kaymasi korumasi) ————————————————————
+        # Her girdi turunda artar. Uretilen HER payload o anki jetonu tasir;
+        # istemci cevabini gonderirken ayni jetonu geri yollar. Sunucu farkli
+        # jeton gorurse girdi BAYAT sayilir ve soru TUKETILMEDEN reddedilir
+        # (web_server /api/game/input -> 409 stale_input).
+        # Neden: /api/game/input sozlesmesinde soru kimligi yoktu; gec gelen her
+        # POST (AI konusurken birikip TTS biter bitmez gonderilen kayit, tek
+        # cevabin VAD ile ikiye bolunmesi, soru duyulmadan baslayan sayacin
+        # timeout'u) o anki soruyu mesru sekilde tuketiyor ve ziyaretcinin
+        # cevabi bir SONRAKI soruya kayiyordu.
+        self.turn_id = 0
         # Test/sergi gunu sinirlamasi: None = tum oyunlar; ör. ("eszit","atasozu")
         # -> menude yalnizca bunlar gorunur ve secilebilir (web_server yonetir).
         self.izinli_oyunlar = None
@@ -551,8 +562,17 @@ class GameEngine:
             log.debug("Sergi logu yazilamadi: %s", e)
 
     # ——— Disa acilan API ————————————————————————————————————
+    def _bump_turn(self) -> int:
+        """Yeni girdi turu basladi — onceki jetonla gelen girdiler bayatlar.
+
+        Durum degistiren TUM giris noktalarinda (start/handle/exit/ai_turn)
+        cagrilir; boylece bir payload'a karsilik YALNIZCA BIR girdi kabul edilir."""
+        self.turn_id += 1
+        return self.turn_id
+
     def start(self) -> dict:
         """Oyunu baslat: DUZ 4 secenekli menuye gec (sabit cevap, LLM yok)."""
+        self._bump_turn()
         self.phase = "menu"
         self._reset_word()
         self._reset_quiz()
@@ -595,6 +615,7 @@ class GameEngine:
         return {
             "game": "menu",
             "phase": "menu",
+            "turn_id": self.turn_id,
             "kind": "reprompt" if reprompt else "menu",
             "turn": "secim",
             "jest_id": _JEST["menu"],
@@ -645,6 +666,7 @@ class GameEngine:
 
     def exit(self) -> dict:
         """Oyundan cik, sohbet moduna don."""
+        self._bump_turn()
         # Gozlem: yarim kalan oyunun ozetini logla (reset ONCESI okunur; akis degismez).
         if self.phase == "kelime" and self.word_turn is not None:
             self._log_game("kelime", "yarim_birakildi",
@@ -658,6 +680,7 @@ class GameEngine:
         self._reset_quiz()
         return {
             "phase": "idle",
+            "turn_id": self.turn_id,
             "kind": "exit",
             "user_echo": None,
             "jest_id": _JEST["exit"],
@@ -676,7 +699,15 @@ class GameEngine:
         timeout=True: kelime oyununda ziyaretci suresi doldu sinyali.
         button=True: girdi panel BUTONUNDAN geldi (sesli degil) — cikis komutlari
         her fazda gecerli kalir.
+
+        NOT: Jeton dogrulamasi BURADA DEGIL cagirandadir (web_server): bu metoda
+        gelindiginde girdi zaten kabul edilmis sayilir ve tur tuketilir.
+        DIKKAT: timeout=True aktif tur YOKKEN buraya gelirse (yarisma bitmis,
+        menu, idle) asagidaki dallar onu girdi sanip oyunu YENIDEN BASLATIR;
+        bu yuzden web_server /api/game/input aktif tur yoksa timeout'u 409 ile
+        reddeder. Yeni bir cagiran eklenirse ayni korumayi tasi.
         """
+        self._bump_turn()
         n = normalize(text)
 
         # Cikis: aktif oyunda yalnizca NET komutlar ("son"/"bitti" gercek kelime olabilir);
@@ -751,6 +782,7 @@ class GameEngine:
         return {
             "game": "kelime",
             "phase": self.phase,
+            "turn_id": self.turn_id,
             "category": None,          # tek, temasiz havuz (edebiyat+tarih+bilim birlesik)
             "kind": kind,
             "turn": turn,
@@ -922,6 +954,7 @@ class GameEngine:
 
     def ai_turn(self) -> dict:
         """Sira AI'dayken cagrilir: AI kelime bulur ya da pes eder (yenilme egrisi)."""
+        self._bump_turn()   # AI hamlesi de yeni tur: onceki tura ait girdiler bayatlar
         if self.phase != "kelime" or self.word_turn != "ai":
             return self._kel_payload(
                 "noop", turn=self.word_turn, jest_id="bekle", yanit="", yogunluk=0.5,
@@ -990,6 +1023,7 @@ class GameEngine:
         return {
             "game": "quiz",
             "phase": self.phase,
+            "turn_id": self.turn_id,
             "kind": kind,
             "turn": turn,
             "quiz": self.quiz_provider,
@@ -1325,6 +1359,7 @@ class GameEngine:
     def status(self) -> dict:
         return {
             "phase": self.phase,
+            "turn_id": self.turn_id,   # istemci fazi kaybederse jetonu buradan tazeler
             "word_turn": self.word_turn,
             "word_score": dict(self.word_score),
             "word_required_letter": self.word_required_letter,

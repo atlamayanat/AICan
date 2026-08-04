@@ -25,6 +25,9 @@ ai/Modelfile
 
 # Local logs (kisisel konusma verisi icerebilir — paylasma)
 logs/*.log
+# Sergi gunu ziyaretci kayitlari + raporlari (etkinlik/kisisel veri — paylasma)
+logs/sergi/
+log/
 
 # Backup / temp
 sistempromptyedek.txt

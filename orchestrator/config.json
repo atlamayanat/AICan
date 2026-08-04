@@ -54,7 +54,7 @@
   "voice_input_autostart": true,
   "voice_input_silence_ms": 700,
   "voice_input_min_speech_ms": 250,
-  "voice_input_silence_ms_game": 400,
+  "voice_input_silence_ms_game": 800,
   "voice_input_min_speech_ms_game": 250,
   "voice_input_max_utterance_ms": 12000,
   "voice_input_onset_mult": 1.5,

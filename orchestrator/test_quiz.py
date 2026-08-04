@@ -3,6 +3,7 @@ Calistir: PYTHONUTF8=1 PYTHONIOENCODING=utf-8 python orchestrator/test_quiz.py
 """
 from __future__ import annotations
 import importlib
+import re
 import sys
 from pathlib import Path
 
@@ -332,15 +333,18 @@ def test_http_quiz():
         post("/api/game/input", text=sel)
         p = post("/api/game/input", text="başla")
         check(f"http {sel} question", p["kind"] == "quiz_question" and p["quiz"] == sel)
-    # Aktif yarisma varken start REDDEDILIR (istemciye faz bildirilir)
+    # Aktif yarisma varken start REDDEDILIR (istemciye faz VE jeton bildirilir:
+    # fazi geri yukleyip jetonsuz kalan istemcinin cevabi bayat sayilirdi)
     r = c.post("/api/game/start")
     check("http start aktif oyunu korur", r.status_code == 409
           and r.get_json().get("error") == "game_active"
           and r.get_json().get("phase") == "quiz")
+    check("http start 409 jeton tasir", r.get_json().get("turn_id") == p["turn_id"])
     # Aktif yarisma varken sesli selam (session/new) da REDDEDILIR
     r = c.post("/api/session/new", json={"reason": "greet"})
     check("http greet aktif oyunu korur", r.status_code == 409
           and r.get_json().get("phase") == "quiz")
+    check("http greet 409 jeton tasir", r.get_json().get("turn_id") == p["turn_id"])
     # Kelime hala menuden erisilebilir
     post("/api/game/exit")
     post("/api/game/start")
@@ -350,6 +354,93 @@ def test_http_quiz():
     r = c.post("/api/game/start")
     check("http start kelimeyi korur", r.status_code == 409
           and r.get_json().get("phase") == "kelime")
+
+
+# ——— Tur jetonu: BAYAT girdi soruyu TUKETMEZ (soru kaymasi korumasi) ———
+def test_http_turn_id():
+    ws = importlib.import_module("web_server")
+    cfg = ws.load_config()
+    cfg["warmup_on_start"] = False
+    cfg["tts_enabled"] = False
+    cfg["test_mode"] = False
+    c = ws.create_app(cfg).test_client()
+
+    def post(u, **b):
+        return c.post(u, json=b or None).get_json()
+
+    # "Soru N/5" -> N (soru tuketildi mi sorusunun tek gozlemlenebilir yaniti)
+    def soru_no(p):
+        m = re.search(r"Soru (\d+)/", p.get("quiz_progress") or "")
+        return int(m.group(1)) if m else None
+
+    post("/api/game/start")
+    post("/api/game/input", text="eszit")
+    p = post("/api/game/input", text="başla")
+    check("jeton payload'da var", isinstance(p.get("turn_id"), int) and p["turn_id"] > 0)
+    tid = p["turn_id"]
+    check("jeton ilk soruda 1/5", soru_no(p) == 1)
+
+    # 1) BAYAT jeton (bir onceki tur) -> 409 + faz/jeton bildirir
+    r = c.post("/api/game/input", json={"text": "beyaz", "turn_id": tid - 1})
+    d = r.get_json()
+    check("bayat jeton 409", r.status_code == 409 and d.get("error") == "stale_input")
+    check("bayat jeton faz+jeton bildirir",
+          d.get("phase") == "quiz" and d.get("turn_id") == tid)
+
+    # ...ve soruyu TUKETMEDI: guncel jetonla gelen cevap hala 1. soruyu yanitlar,
+    # yani sonraki payload 2. sorudur (bayat POST islenseydi 3'e atlardi).
+    p2 = post("/api/game/input", text="beyaz", turn_id=tid)
+    check("bayat jeton soruyu tuketmez", soru_no(p2) == 2)
+    check("guncel jeton kabul + jeton ilerler", p2.get("turn_id") == tid + 1)
+
+    # 2) AYNI jetonla ikinci POST (VAD'in ikiye boldugu cevabin 2. parcasi) -> 409
+    r = c.post("/api/game/input", json={"text": "siyah", "turn_id": tid})
+    check("ayni jeton ikinci kez reddedilir",
+          r.status_code == 409 and r.get_json().get("error") == "stale_input")
+
+    # 3) BAYAT timeout POST'u da reddedilir: soru N icin baslayan sayac N+1'i
+    #    oldurmesin (jetonsuz timeout'ta sahada gorulen "sure doldu" yarisinin koku).
+    tid2 = p2["turn_id"]
+    r = c.post("/api/game/input", json={"timeout": True, "turn_id": tid2 - 1})
+    check("bayat timeout reddedilir",
+          r.status_code == 409 and r.get_json().get("error") == "stale_input")
+    p3 = post("/api/game/input", text="beyaz", turn_id=tid2)
+    check("bayat timeout soruyu tuketmez", soru_no(p3) == 3)
+
+    # 4) GERIYE DONUK UYUM: jeton alanini HIC gondermeyen istemci (eski panel/sekme)
+    #    kabul edilir — uyum anahtarin VARLIGINA bakar, degerine degil.
+    p4 = post("/api/game/input", text="beyaz")
+    check("jetonsuz istemci kabul edilir", soru_no(p4) == 4)
+
+    # 5) turn_id=null GONDEREN istemci: jeton destekliyor ama senkronu kaybetmis
+    #    (409 game_active ile fazi geri yukleyip jetonsuz kalan surucu). Koruma
+    #    KAPANMAZ: bayat sayilir, soru tuketilmez, gercek jeton bildirilir.
+    tid4 = p4["turn_id"]
+    r = c.post("/api/game/input", json={"text": "siyah", "turn_id": None})
+    d = r.get_json()
+    check("null jeton reddedilir",
+          r.status_code == 409 and d.get("error") == "stale_input")
+    check("null jeton gercek jetonu bildirir", d.get("turn_id") == tid4)
+    p5 = post("/api/game/input", text="beyaz", turn_id=tid4)
+    check("null jeton soruyu tuketmez", soru_no(p5) == 5)
+
+    # 6) GEC TIMEOUT, aktif tur YOKKEN: yarisma bittikten sonra ulasan sayac
+    #    bildirimi handle()'da _start_quiz'e dusup oyunu YENIDEN BASLATIYORDU
+    #    (sahada "biten oyun kendi kendine tekrar acildi"). Artik 409 + noop.
+    son = post("/api/game/input", text="beyaz", turn_id=p5["turn_id"])
+    check("5. cevaptan sonra yarisma biter", son.get("ended") is True)
+    tid_son = son["turn_id"]
+    r = c.post("/api/game/input", json={"timeout": True, "turn_id": tid_son})
+    d = r.get_json()
+    check("aktif tur yokken timeout reddedilir",
+          r.status_code == 409 and d.get("error") == "stale_input")
+    check("gec timeout oyunu yeniden baslatmaz", d.get("turn_id") == tid_son)
+
+    # 7) MENUDE gelen gec timeout da yoksayilir (eskiden menuyu tekrar sordururdu)
+    m = post("/api/game/start")
+    r = c.post("/api/game/input", json={"timeout": True, "turn_id": m["turn_id"]})
+    check("menude timeout yoksayilir",
+          r.status_code == 409 and r.get_json().get("phase") == "menu")
 
 
 def test_http_test_modu():
@@ -416,6 +507,7 @@ if __name__ == "__main__":
     test_test_modu_sinirli_menu()
     test_quiz_exit()
     test_http_quiz()
+    test_http_turn_id()
     test_http_test_modu()
     print(f"\nSonuc: {_PASS} PASS / {_FAIL} FAIL")
     sys.exit(0 if _FAIL == 0 else 1)

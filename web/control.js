@@ -747,7 +747,7 @@
       // geri yüklenir, sonraki girdi oyuna akar.
       const data = await postNewSession('greet');
       if (data.error) {
-        if (data.phase) gamePhase = (data.phase !== 'idle') ? data.phase : null;
+        adoptServerGameState(data);   // faz + tur jetonu birlikte geri yüklenir
         log('sys', 'yeni oturum reddedildi: ' + data.error
           + (data.phase ? ' (faz: ' + data.phase + ')' : ''));
         return;
@@ -947,6 +947,17 @@
   // Oyun mantığı backend'de (game_engine.py). Burası ince yönlendirici:
   // hazır komutu yakalar, /api/game/* çağırır, sergiye yansıtır, dokunmatik buton render eder.
   let gamePhase = null; // null | 'menu' | 'rps'
+  // Son uygulanan payload'ın jetonu, panel girdisinin hangi tura ait olduğunu kanıtlar.
+  let gameTurnId = null;
+  // 409 (game_active / stale_input) sonrası sunucu durumunu adopt et. Jetonu almayı
+  // atlamak sessiz bir delik açıyordu: faz geri yüklenip gameTurnId null kalınca
+  // sonraki girdi turn_id=null ile gidiyor, sunucu da (eskiden) onu doğrulamadan
+  // kabul edip yanlış soruyu tüketiyordu.
+  function adoptServerGameState(data) {
+    if (!data) return;
+    if (Number.isInteger(data.turn_id)) gameTurnId = data.turn_id;
+    if (data.phase) gamePhase = (data.phase !== 'idle') ? data.phase : null;
+  }
   let sentUserText = ''; // sergi balonuna son yazılan kullanıcı girdisi (fuzzy düzeltme kıyası)
 
   function normalizeTr(s) {
@@ -976,8 +987,8 @@
       const r = await fetch('/api/game/start', { method: 'POST' });
       const data = await r.json();
       if (data.error) {
-        // 409 game_active: backend ortadaki oyunu korudu — fazı geri yükle.
-        if (data.phase) gamePhase = (data.phase !== 'idle') ? data.phase : null;
+        // 409 game_active: backend ortadaki oyunu korudu — faz + jetonu geri yükle.
+        adoptServerGameState(data);
         sendThinking(false);
         log('sys', 'oyun başlatılamadı: ' + data.error
           + (data.phase ? ' (faz: ' + data.phase + ')' : ''));
@@ -1018,17 +1029,29 @@
     if (wasUserWordTurn) {
       thinkTimer = setTimeout(() => showThinking('Hmm, bakıyorum…'), 450);
     }
+    const turnId = gameTurnId;
     try {
       const r = await fetch('/api/game/input', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         // button: panel butonu sesli girdiden ayrilir — backend cikis komutlarini
         // aktif quiz'de yalnizca butondan kabul eder (STT gurultu korumasi).
-        body: JSON.stringify({ text: text, button: !!isButton }),
+        body: JSON.stringify({ text: text, button: !!isButton, turn_id: turnId }),
       });
       const data = await r.json();
       if (thinkTimer) { clearTimeout(thinkTimer); thinkTimer = null; }
-      if (data.error) { sendThinking(false); log('sys', 'oyun hatası: ' + data.error); return; }
+      if (data.error) {
+        // Bayat panel isteği oyunu ilerletmez; sonraki girdi güncel faz/jetonla gider.
+        // Arada daha yeni payload geldiyse eski 409 onun jetonunu geri sarmamalı.
+        if (data.error === 'stale_input' && gameTurnId === turnId) {
+          adoptServerGameState(data);
+        } else if (data.error === 'stale_input') {
+          return;
+        }
+        sendThinking(false);
+        log('sys', 'oyun hatası: ' + data.error);
+        return;
+      }
       await applyGamePayload(data);
     } catch (e) {
       if (thinkTimer) { clearTimeout(thinkTimer); thinkTimer = null; }
@@ -1040,6 +1063,7 @@
   async function applyGamePayload(p) {
     if (!p) return;
     gamePhase = (p.phase && p.phase !== 'idle') ? p.phase : null;
+    if (Number.isInteger(p.turn_id)) gameTurnId = p.turn_id;
     const isWord = (p.game === 'kelime');
     const isTimed = (p.game === 'kelime' || p.game === 'quiz');
 
@@ -1152,13 +1176,20 @@
 
   async function submitGameTimeout() {
     log('sys', 'kelime: süre doldu');
+    const turnId = gameTurnId;
     try {
       const r = await fetch('/api/game/input', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ timeout: true }),
+        body: JSON.stringify({ timeout: true, turn_id: turnId }),
       });
       const data = await r.json();
+      if (data.error === 'stale_input') {
+        // Eski sayacın timeout'u yeni turu tüketmez; panel sunucuyla yeniden eşitlenir.
+        // (Aktif tur yokken gelen geç timeout'u da backend bu hatayla reddediyor.)
+        if (gameTurnId === turnId) adoptServerGameState(data);
+        return;
+      }
       if (!data.error) await applyGamePayload(data);
     } catch (e) {
       log('sys', 'kelime timeout ağ hatası: ' + e.message);

@@ -892,7 +892,9 @@ def create_app(config: dict) -> Flask:
         gurultuyle 'greet' atarsa ORTADAKI OYUN bozulmasin. Sayfa yenilenip
         oyun sahipsiz kaldiysa (60+ sn girdisiz) eskimis sayilir ve sifirlamaya
         izin verilir — yoksa kiosk sonsuza dek "oyun aktif" diye selam veremezdi.
-        409 yaniti phase tasir: istemci fazi geri yukleyip kendini onarir.
+        409 yaniti phase VE turn_id tasir: istemci fazi geri yukleyip kendini
+        onarir; jetonu da tazeler ki sonraki cevap gecerli turla gitsin (jetonsuz
+        istemci /api/game/input'ta korumasiz kalirdi).
         """
         payload = request.get_json(silent=True) or {}
         reason = str(payload.get("reason") or "eski_istemci")[:24]
@@ -904,7 +906,8 @@ def create_app(config: dict) -> Flask:
                     and reason not in ("attract", "idle_reset", "end_to_eyes")):
                 logger.log_event(
                     f"session/new REDDEDILDI: aktif oyun korundu (neden={reason})")
-                return jsonify({"error": "game_active", "phase": game.phase}), 409
+                return jsonify({"error": "game_active", "phase": game.phase,
+                                "turn_id": game.turn_id}), 409
         # Sergi ziyaretci logu: "ziyaretci gitti" nedenleri acik kaydi kapatir;
         # greet yeni ziyaretci acar (yalniz sergi/test modunda — panel kullanimi
         # ziyaretci sayilmaz). visitor_start acik kaydi zaten guvenle kapatir.
@@ -984,14 +987,17 @@ def create_app(config: dict) -> Flask:
         # sifirlanmasin. Fazi kaybetmis (sayfa yenilenmis / payload kacirmis)
         # bir istemci "oyun oynayalim" duyunca start cagirir ve ORTADAKI
         # yarismayi menuye dondururdu. 409 + phase doner; istemci fazi geri
-        # yukler, sonraki girdi oyuna akar (kendiliginden onarim).
+        # yukler, sonraki girdi oyuna akar (kendiliginden onarim). 409 phase ile
+        # BIRLIKTE turn_id tasir: fazi geri yukleyen istemci jetonsuz kalirsa
+        # sonraki cevabi /api/game/input'ta dogrulanamaz ve yanlis soruyu tuketir.
         with game_lock:
             aktif_oyun = ((game.phase == "quiz" and game.quiz_turn is not None)
                           or (game.phase == "kelime" and game.word_turn is not None))
             taze = (time.time() - game_last_input["t"]) < 60
             if aktif_oyun and taze:
                 logger.log_event("game/start REDDEDILDI: aktif oyun korundu")
-                return jsonify({"error": "game_active", "phase": game.phase}), 409
+                return jsonify({"error": "game_active", "phase": game.phase,
+                                "turn_id": game.turn_id}), 409
             result = game.start()
         game_last_input["t"] = time.time()
         logger.log_event("Oyun baslatildi (kelime turetme)")
@@ -1005,12 +1011,51 @@ def create_app(config: dict) -> Flask:
         # button=True: panel butonundan geldi — sesli girdiden farkli olarak
         # cikis komutlari aktif quiz'de de gecerli (STT gurultusu sayilmaz).
         button = bool(payload.get("button"))
+        # TUR JETONU (soru kaymasi korumasi): istemci, cevabini HANGI payload'a
+        # verdigini bildirir. Jeton sunucudakinden farkliysa girdi BAYAT'tir —
+        # soru TUKETILMEDEN reddedilir. Bayat girdi kaynaklari: AI konusurken
+        # birikip TTS biter bitmez gonderilen kayit, tek cevabin VAD ile ikiye
+        # bolunmesi, soru duyulmadan baslayan sayacin gec timeout'u.
+        # GERIYE DONUK UYUM anahtarin VARLIGINA bakar: jeton alanini HIC
+        # gondermeyen istemci (eski panel/sekme) eskisi gibi kabul edilir.
+        # turn_id=null GONDEREN istemci jeton destekliyor ama senkronu KAYBETMIS
+        # demektir (orn. 409 game_active ile fazi geri yukleyip jetonsuz kalmak) —
+        # "None ise atla" mantigi bu durumda korumayi sessizce kapatiyor, girdi
+        # dogrulanmadan o anki soruyu tuketiyordu. Artik bayat sayilir: istemci
+        # 409'dan gercek jetonu ogrenir, sonraki soz dogru turla gider.
+        jeton_gonderildi = "turn_id" in payload
+        client_turn = payload.get("turn_id")
         if not text and not timeout:
             return jsonify({"error": "metin bos"}), 400
         # Sergi koruma: oyun girdileri kisa olmali
         if len(text) > 60:
             text = text[:60]
         with game_lock:
+            if jeton_gonderildi:
+                try:
+                    ct = int(client_turn)
+                except (TypeError, ValueError):
+                    ct = None          # null / bozuk jeton = senkron kaybi
+                if ct != game.turn_id:
+                    logger.log_event(
+                        f"game/input BAYAT girdi reddedildi (jeton {client_turn} != "
+                        f"{game.turn_id}){' [timeout]' if timeout else ''}: {text[:40]!r}")
+                    return jsonify({"error": "stale_input",
+                                    "turn_id": game.turn_id,
+                                    "phase": game.phase}), 409
+            # GEC TIMEOUT: aktif tur yoksa (yarisma bitti, menu, hazir-oncesi,
+            # idle) handle() timeout'u girdi sanip _start_quiz/_start_kelime/start
+            # cagiriyor — sahada "biten oyun kendiliginden yeniden basladi".
+            # Jeton bunu cogu durumda keser (istemci bitiste sayaci durdurur) ama
+            # jetonsuz istemci ya da tam yarisi kazanmis bir istek hâlâ gecebilir:
+            # aktif tur yoksa timeout HICBIR SEY yapmaz, tur da tuketilmez.
+            if timeout and not ((game.phase == "kelime" and game.word_turn is not None)
+                                or (game.phase == "quiz" and game.quiz_turn is not None)):
+                logger.log_event(
+                    f"game/input GEC timeout yoksayildi (aktif tur yok, faz={game.phase})")
+                return jsonify({"error": "stale_input",
+                                "turn_id": game.turn_id,
+                                "phase": game.phase}), 409
             result = game.handle(text, timeout=timeout, button=button)
         game_last_input["t"] = time.time()
         if text and not timeout:
